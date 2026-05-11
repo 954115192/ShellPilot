@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "find-skills": {
+      "name": "Find Skills",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=find-skills",
+      "source": "skillhub",
+      "version": "0.1.0"
+    }
+  }
+}

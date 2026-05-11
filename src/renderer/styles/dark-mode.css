@@ -1,0 +1,72 @@
+/* 全局暗黑模式样式 */
+
+/* 按钮、菜单、标签等交互元素不可选中 */
+button,
+.el-button,
+.el-menu-item,
+.el-tabs__item,
+.el-tag,
+.el-breadcrumb__inner,
+.tab-item,
+.tab-name,
+.tab-close,
+.add-tab-btn,
+.suggestion-item,
+.card-name,
+.card-actions,
+.toolbar-left,
+.toolbar-right,
+.extension-bar,
+.connection-status,
+.search-count,
+.file-name,
+.file-name-cell,
+.tree-node-label,
+.tree-node,
+.perm-label,
+.perm-numeric,
+.path-segment,
+.file-icon,
+.el-tree-node__content {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 页面背景 */
+html.dark {
+  background-color: var(--el-bg-color-page);
+}
+
+/* 滚动条样式 */
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: var(--el-fill-color-darker);
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: var(--el-fill-color-dark);
+  border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--el-fill-color);
+}
+
+/* 选中文本样式 */
+::selection {
+  background: var(--el-color-primary-light-5);
+  color: var(--el-color-white);
+}
+
+/* 链接样式 */
+a {
+  color: var(--el-color-primary);
+}
+
+a:hover {
+  color: var(--el-color-primary-light-3);
+}

@@ -1,0 +1,51 @@
+{
+  "name": "shell-pilot",
+  "version": "1.0.0",
+  "description": "AI 驱动的跨平台 SSH Shell 客户端",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "ts:build": "npm run build",
+    "dev:vite": "vite --port 5173",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\" --kill-others",
+    "build": "vite build && tsc --project tsconfig.main.json && tsc src/preload/index.ts --outDir dist/preload --module commonjs --target ES2020 --esModuleInterop --skipLibCheck --declaration false",
+    "electron": "electron .",
+    "start": "npm run build && electron .",
+    "package": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@electron/remote": "^2.1.0",
+    "@element-plus/icons-vue": "^2.3.2",
+    "chokidar": "^3.6.0",
+    "echarts": "^6.0.0",
+    "ssh2": "^1.17.0",
+    "systeminformation": "^5.11.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-search": "^0.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ssh2": "^1.15.5",
+    "@vitejs/plugin-vue": "^4.0.0",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.7.7",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.0.0",
+    "element-plus": "^2.13.7",
+    "pinia": "^2.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^4.0.0",
+    "vue": "^3.3.0",
+    "wait-on": "^7.2.0"
+  },
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/xiezhiyun/shell.git"
+  },
+  "keywords": ["ssh", "terminal", "shell", "electron", "vue", "ai", "agent"]
+}

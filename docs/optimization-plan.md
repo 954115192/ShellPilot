@@ -59,7 +59,7 @@
 - `terminalStore` — 标签页管理、活动标签
 - `commandStore` — 快捷命令、按连接的命令频次记录
 - `aiStore` — AI 配置、按标签隔离的对话状态
-- `settingsStore` — 主题、搜索高亮颜色
+- `settingsStore` — 深色/浅色主题、终端主题（6 预设 + 自定义 CRUD）、搜索高亮颜色
 - `keyStore` — SSH 密钥管理
 - `transferStore` — 文件传输进度
 

@@ -2,40 +2,59 @@
 
 AI 驱动的跨平台 SSH Shell 客户端，让运维从"记命令"变成"说意图"。
 
-> 本项目全程使用 **Claude Code** + **MiMo 大模型**（小米赠送的 token）开发完成。
+> 作为一个非专业运维人员，我经常记不住命令，每次都要切出去查文档，用过的终端对命令提示也不够友好。
+> 一直想自己做一个趁手的终端工具，但苦于没有相关经验，迟迟没有动手。
+> 直到小米的百亿 token 计划，抱着试试的心态用这个想法去申请，没想到小米直接批了 16 亿 token。
+> 于是这个搁置已久的想法终于落地了——感谢小米。
+> 项目前期使用 **Claude Code + DeepSeek** 搭建框架，收到小米 token 后全程使用 **MiMo 大模型**完成后续开发。
 
 ## 功能特性
 
 ### 终端 & SSH
-- 多标签 SSH 连接（密码/私钥认证）
+- 多标签 SSH 连接（密码 / 私钥认证）
 - 完整的 xterm.js 终端模拟
+- SSH Keepalive 防止空闲断开，断连后任意键自动重连
 - 命令建议系统（历史命令 + 快捷命令，光标下方弹出）
 - 命令使用频次记录，越用越智能
+- Ctrl+C 智能切换：有选中时复制，无选中时发送 SIGINT
+- Ctrl+V 粘贴剪贴板内容到终端
+- 终端搜索高亮（支持自定义搜索颜色）
+
+### 终端主题
+- 6 套内置主题：默认 / Monokai / Dracula / Solarized Dark / Nord / GitHub
+- 自定义主题：支持创建、编辑、删除，可自定义全部 20 项颜色（前景、背景、光标、ANSI 16 色等）
+- 主题切换实时生效，保存到本地
 
 ### AI 智能助手
 - **智能问答** — 解释命令、分析错误、回答运维问题
 - **智能体** — 自主探索服务器，多步推理执行任务（如"帮我启动 MyApp"）
 - 支持自定义 API（OpenAI / Ollama / 通义千问 / DeepSeek 等兼容格式）
 - 终端选中文字右键直接询问 AI
-- 命令安全检测（三级防护：低/中/高/危险）
+- 命令安全检测（四级防护：低 / 中 / 高 / 危险）
+- AI 侧边栏可拖拽调宽，宽度持久化
 
 ### 文件管理
 - 远程文件浏览器（目录导航、上传、下载）
-- 文件传输进度追踪、暂停/取消
+- 文件传输进度追踪、暂停 / 取消
 - 独立 SFTP 通道，传输不阻塞其他操作
 
 ### 性能监控
 - CPU / 内存 / 磁盘 / 网络实时监控
 - ECharts 仪表盘和趋势曲线图
-- 网络速度实时计算
+- 网络速度前端计算（基于累积字节差值）
 
-### 其他
+### 界面
+- 无边框窗口 + 自定义标题栏（拖拽移动、最小化、最大化、关闭）
 - 深色 / 浅色 / 跟随系统主题
 - SSH 密钥管理
 - 快捷命令管理（内置 + 自定义）
-- 终端搜索高亮（可自定义颜色）
 
 ## 快速开始
+
+### 环境要求
+
+- Node.js >= 16
+- npm >= 8
 
 ### 安装依赖
 
@@ -49,12 +68,14 @@ npm install
 npm run dev
 ```
 
-### 构建应用
+### 构建安装包
 
 ```bash
 npm run build
 npm run package
 ```
+
+构建产物在 `release/` 目录下。
 
 ## AI 配置
 
@@ -67,10 +88,13 @@ npm run package
 | 模型 | 如 `gpt-4o`、`qwen2.5`、`deepseek-chat` |
 
 支持所有兼容 OpenAI 格式的服务，包括：
-- OpenAI: `https://api.openai.com/v1`
-- Ollama: `http://localhost:11434/v1`
-- 通义千问: `https://dashscope.aliyuncs.com/compatible-mode/v1`
-- DeepSeek: `https://api.deepseek.com/v1`
+
+| 服务 | API 地址 |
+|------|---------|
+| OpenAI | `https://api.openai.com/v1` |
+| Ollama | `http://localhost:11434/v1` |
+| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| DeepSeek | `https://api.deepseek.com/v1` |
 
 ## 技术栈
 
@@ -82,7 +106,7 @@ npm run package
 | 状态管理 | Pinia |
 | 构建工具 | Vite |
 | SSH | ssh2 |
-| 终端 | xterm.js |
+| 终端 | xterm.js 5.3 |
 | 图表 | ECharts |
 
 ## 目录结构
@@ -91,25 +115,29 @@ npm run package
 src/
 ├── main/                    # Electron 主进程
 │   ├── ai/                  # AI Agent 框架
-│   │   ├── LLMProvider.ts   # OpenAI 兼容 LLM 调用
-│   │   ├── AgentLoop.ts     # Agent 核心循环
-│   │   ├── AgentTools.ts    # 工具集
-│   │   ├── SecurityGuard.ts # 命令安全检测
-│   │   └── AIBridge.ts      # 主进程管理器
-│   ├── ipc/                 # IPC 通信
+│   │   ├── LLMProvider.ts   # OpenAI 兼容 LLM 调用（流式）
+│   │   ├── AgentLoop.ts     # Agent 核心循环（Think → Act → Observe）
+│   │   ├── AgentTools.ts    # 工具集（执行命令、读文件、列目录、搜索）
+│   │   ├── SecurityGuard.ts # 命令安全检测（四级防护）
+│   │   └── AIBridge.ts      # 主进程管理器（per-tab Agent 实例）
+│   ├── file/                # 文件管理（SFTP 上传/下载）
+│   ├── ipc/                 # IPC 通信（handlers + registry）
 │   ├── session/             # 会话管理
-│   ├── ssh/                 # SSH 客户端
-│   └── stats/               # 性能监控
+│   ├── ssh/                 # SSH 客户端（Keepalive + 重连）
+│   └── stats/               # 性能监控（CPU/内存/磁盘/网络）
 ├── renderer/                # Vue 渲染进程
 │   ├── components/
-│   │   ├── ai/              # AI 侧边栏
+│   │   ├── ai/              # AI 侧边栏（问答 + 智能体）
 │   │   ├── files/           # 文件浏览器
-│   │   ├── terminal/        # 终端组件
+│   │   ├── terminal/        # 终端组件（命令建议、复制粘贴）
 │   │   └── sessions/        # 会话列表
 │   ├── stores/              # Pinia 状态管理
+│   │   ├── aiStore.ts       # AI 状态（per-tab 消息隔离）
+│   │   ├── settingsStore.ts # 设置（主题、AI 配置、终端主题）
+│   │   └── commandStore.ts  # 命令历史与频次统计
 │   └── views/               # 页面视图
-├── preload/                 # 预加载脚本
-└── types/                   # 类型声明
+├── preload/                 # 预加载脚本（contextBridge API）
+└── types/                   # TypeScript 类型声明
 ```
 
 ## 开发故事

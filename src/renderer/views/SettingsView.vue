@@ -110,6 +110,19 @@
           </div>
         </el-collapse-item>
 
+        <!-- 编辑器设置 -->
+        <el-collapse-item title="编辑器设置" name="editor">
+          <div class="editor-setting">
+            <label>文件打开方式</label>
+            <el-radio-group v-model="settingsStore.editorMode" size="small">
+              <el-radio-button value="window">独立窗口</el-radio-button>
+              <el-radio-button value="tab">标签页</el-radio-button>
+            </el-radio-group>
+            <p class="setting-hint">独立窗口：每个文件一个独立窗口</p>
+            <p class="setting-hint">标签页：所有文件在一个窗口内通过标签切换</p>
+          </div>
+        </el-collapse-item>
+
         <!-- SSH 密钥管理 -->
         <el-collapse-item title="SSH 密钥管理" name="keys">
           <div class="keys-section">
@@ -621,6 +634,23 @@ const deleteKey = async (id: string) => {
 
 .color-actions {
   margin-top: 8px;
+}
+
+/* 编辑器设置 */
+.editor-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.editor-setting label {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  font-weight: 500;
+}
+.setting-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  margin: 0;
 }
 
 .keys-section {

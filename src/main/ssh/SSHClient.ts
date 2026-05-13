@@ -499,6 +499,26 @@ export class SSHClient extends EventEmitter {
     await this.executeCommand(`rm -rf "${remotePath}"`);
   }
 
+  async readFile(remotePath: string): Promise<string> {
+    const sftp = await this.getSFTP();
+    return new Promise((resolve, reject) => {
+      sftp.readFile(remotePath, (err: any, data: Buffer) => {
+        if (err) return reject(err);
+        resolve(data.toString('utf-8'));
+      });
+    });
+  }
+
+  async writeFile(remotePath: string, content: string): Promise<void> {
+    const sftp = await this.getSFTP();
+    return new Promise((resolve, reject) => {
+      sftp.writeFile(remotePath, Buffer.from(content, 'utf-8'), (err: any) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  }
+
   async disconnect(): Promise<void> {
     this.connected = false;
     if (this.sftp) {

@@ -12,6 +12,11 @@ declare global {
       downloadFile: (remotePath: string, filePath: string, tabId: string, transferId?: string) => Promise<{ success: boolean }>;
       createDirectory: (remotePath: string, tabId: string) => Promise<{ success: boolean }>;
       listDirectory: (path: string, tabId: string) => Promise<{ success: boolean; files: FileInfo[]; error?: string }>;
+      readFileContent: (tabId: string, remotePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+      writeFileContent: (tabId: string, remotePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+      openEditorWindow: (filePath: string, fileName: string, tabId: string, isDark: boolean, mode?: string) => Promise<{ success: boolean }>;
+      onOpenFile: (callback: (data: { path: string; tabId: string }) => void) => void;
+      editorReady: () => void;
       createSession: (config: SSHConfig) => Promise<SessionInfo>;
       getSession: (id: string) => Promise<SessionInfo | undefined>;
       listSessions: () => Promise<SessionInfo[]>;

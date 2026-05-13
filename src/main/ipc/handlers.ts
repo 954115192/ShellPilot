@@ -89,6 +89,22 @@ export function registerIPCHandlers(): void {
     }
   })
 
+  ipcMain.handle('file:read-content', async (event, tabId, remotePath) => {
+    try {
+      return await ipcRegistry.readFileContent(tabId, remotePath)
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('file:write-content', async (event, tabId, remotePath, content) => {
+    try {
+      return await ipcRegistry.writeFileContent(tabId, remotePath, content)
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   ipcMain.handle('disconnect-ssh', async (event, tabId) => {
     try {
       await ipcRegistry.disconnectSSH(tabId)

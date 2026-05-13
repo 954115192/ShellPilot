@@ -69,6 +69,18 @@ export interface ConnectionResult {
   message: string;
 }
 
+// 编辑器窗口：立即监听新文件 IPC（不等 Vue 挂载）
+const _pendingEditorFiles: Array<{ path: string; tabId: string }> = [];
+let _editorFileCallback: ((data: { path: string; tabId: string }) => void) | null = null;
+ipcRenderer.on('editor:open-file', (_event, data) => {
+  if (!data || !data.path) return;
+  if (_editorFileCallback) {
+    _editorFileCallback(data);
+  } else {
+    _pendingEditorFiles.push(data);
+  }
+});
+
 contextBridge.exposeInMainWorld('electronAPI', {
   connectSSH: (config: SSHConfig, tabId: string) => ipcRenderer.invoke('connect-ssh', config, tabId),
   disconnectSSH: (tabId: string) => ipcRenderer.invoke('disconnect-ssh', tabId),
@@ -78,6 +90,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadFile: (remotePath: string, filePath: string, tabId: string, transferId?: string) => ipcRenderer.invoke('download-file', remotePath, filePath, tabId, transferId),
   createDirectory: (remotePath: string, tabId: string) => ipcRenderer.invoke('create-directory', remotePath, tabId),
   listDirectory: (path: string, tabId: string) => ipcRenderer.invoke('list-directory', path, tabId),
+  readFileContent: (tabId: string, remotePath: string) => ipcRenderer.invoke('file:read-content', tabId, remotePath),
+  writeFileContent: (tabId: string, remotePath: string, content: string) => ipcRenderer.invoke('file:write-content', tabId, remotePath, content),
+  openEditorWindow: (filePath: string, fileName: string, tabId: string, isDark: boolean, mode?: string) => ipcRenderer.invoke('editor:open', filePath, fileName, tabId, isDark, mode),
+  onOpenFile: (callback: (data: { path: string; tabId: string }) => void) => {
+    _editorFileCallback = callback;
+    for (const f of _pendingEditorFiles) callback(f);
+    _pendingEditorFiles.length = 0;
+  },
+  editorReady: () => ipcRenderer.send('editor:ready'),
   createSession: (config: SSHConfig) => ipcRenderer.invoke('create-session', config),
   getSession: (id: string) => ipcRenderer.invoke('get-session', id),
   listSessions: () => ipcRenderer.invoke('list-sessions'),

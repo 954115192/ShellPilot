@@ -205,6 +205,29 @@ export class IPCRegistry {
     }
   }
 
+  // 文件内容读写（编辑器用）
+  async readFileContent(tabId: string, remotePath: string): Promise<{ success: boolean; content?: string; error?: string }> {
+    const client = this.sshClients.get(tabId);
+    if (!client) return { success: false, error: '未连接 SSH' }
+    try {
+      const content = await client.readFile(remotePath)
+      return { success: true, content }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  }
+
+  async writeFileContent(tabId: string, remotePath: string, content: string): Promise<{ success: boolean; error?: string }> {
+    const client = this.sshClients.get(tabId);
+    if (!client) return { success: false, error: '未连接 SSH' }
+    try {
+      await client.writeFile(remotePath, content)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  }
+
   // 性能监控 - 使用远程服务器统计
   async getSystemStats(tabId: string): Promise<any> {
     const client = this.sshClients.get(tabId);

@@ -206,6 +206,12 @@
           <el-dropdown-item command="open" :disabled="!contextMenuItem">
             <el-icon><FolderOpened/></el-icon> 本地编辑器打开
           </el-dropdown-item>
+          <el-dropdown-item
+              command="editInline"
+              :disabled="!contextMenuItem || !!contextMenuItem.isDirectory || !isTextFile(contextMenuItem?.label || '')"
+          >
+            <el-icon><EditPen/></el-icon> 内置编辑器打开
+          </el-dropdown-item>
 
           <el-dropdown-item command="rename" :disabled="!contextMenuItem" divided>
             <el-icon><Edit/></el-icon> 重命名
@@ -291,6 +297,7 @@ import {
   Monitor,
   FolderOpened,
   DocumentCopy,
+  EditPen,
   ArrowUp,
   Download,
   Upload,
@@ -303,6 +310,7 @@ import {
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {getActiveTabId, getActiveSession} from '../../stores/terminalStore';
 import {useTransferStore} from '../../stores/transferStore';
+import {useSettingsStore} from '../../stores/settingsStore';
 
 const props = defineProps<{
   tabId?: string
@@ -712,6 +720,27 @@ const handleTreeClick = (data: any) => {
   }
 };
 
+const settingsStore = useSettingsStore();
+
+const TEXT_EXTENSIONS = new Set([
+  'txt','log','md','markdown','json','jsonc','yaml','yml','toml','ini','conf','cfg',
+  'js','mjs','cjs','ts','mts','jsx','tsx','vue','html','htm','css','scss','less','xml','svg',
+  'py','rb','go','rs','java','c','cpp','h','hpp','sh','bash','zsh','fish','ps1','bat','cmd',
+  'sql','env','gitignore','dockerignore','csv','tsv',
+]);
+const isTextFile = (name: string): boolean => {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (TEXT_EXTENSIONS.has(ext)) return true;
+  if (!ext || ['dockerfile','makefile','readme','license','changelog'].some(n => name.toLowerCase().startsWith(n))) return true;
+  return false;
+};
+
+const openInEditor = async (file: FileItem) => {
+  const tabId = getTabId();
+  const isDark = document.documentElement.classList.contains('dark');
+  await window.electronAPI.openEditorWindow(file.path, file.label, tabId, isDark, settingsStore.editorMode);
+};
+
 const handleRowDblClick = async (row: FileItem) => {
   if (row.isDirectory || row.isSymlink) {
     currentPath.value = row.path;
@@ -724,8 +753,11 @@ const handleRowDblClick = async (row: FileItem) => {
     if (treeRef.value) {
       treeRef.value.setCurrentKey(row.path);
     }
+  } else if (isTextFile(row.label) && row.size <= 5 * 1024 * 1024) {
+    openInEditor(row);
+  } else if (row.size > 5 * 1024 * 1024) {
+    ElMessage.warning('文件过大，建议下载后编辑');
   } else {
-    // 文件：用本地程序打开
     openFileWithLocalProgram(row);
   }
 };
@@ -809,6 +841,9 @@ const handleContextMenuCommand = (command: string) => {
       break;
     case 'open':
       openItem(contextMenuItem.value);
+      break;
+    case 'editInline':
+      if (contextMenuItem.value) openInEditor(contextMenuItem.value);
       break;
     case 'rename':
       showRenameDialog(contextMenuItem.value);

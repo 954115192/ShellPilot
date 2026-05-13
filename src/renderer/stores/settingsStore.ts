@@ -102,7 +102,9 @@ const defaultSearchColors: SearchColors = {
   activeMatchBorder: 'rgba(76, 175, 80, 0.9)',
 }
 
-function loadSettings(): { searchColors: SearchColors; theme: ThemeMode; terminalTheme: string; customTerminalThemes: TerminalTheme[] } {
+export type EditorMode = 'window' | 'tab'
+
+function loadSettings(): { searchColors: SearchColors; theme: ThemeMode; terminalTheme: string; customTerminalThemes: TerminalTheme[]; editorMode: EditorMode } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -112,10 +114,11 @@ function loadSettings(): { searchColors: SearchColors; theme: ThemeMode; termina
         theme: parsed.theme || 'dark',
         terminalTheme: parsed.terminalTheme || 'default',
         customTerminalThemes: parsed.customTerminalThemes || [],
+        editorMode: parsed.editorMode || 'window',
       }
     }
   } catch {}
-  return { searchColors: { ...defaultSearchColors }, theme: 'dark', terminalTheme: 'default', customTerminalThemes: [] }
+  return { searchColors: { ...defaultSearchColors }, theme: 'dark', terminalTheme: 'default', customTerminalThemes: [], editorMode: 'window' }
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -124,6 +127,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<ThemeMode>(saved.theme)
   const terminalThemeName = ref<string>(saved.terminalTheme)
   const customTerminalThemes = ref<TerminalTheme[]>(saved.customTerminalThemes)
+  const editorMode = ref<EditorMode>(saved.editorMode)
 
   function saveSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -131,6 +135,7 @@ export const useSettingsStore = defineStore('settings', () => {
       theme: theme.value,
       terminalTheme: terminalThemeName.value,
       customTerminalThemes: customTerminalThemes.value,
+      editorMode: editorMode.value,
     }))
   }
 
@@ -172,6 +177,7 @@ export const useSettingsStore = defineStore('settings', () => {
   watch(searchColors, saveSettings, { deep: true })
   watch(theme, saveSettings)
   watch(terminalThemeName, saveSettings)
+  watch(editorMode, saveSettings)
 
   function resetSearchColors() {
     searchColors.value = { ...defaultSearchColors }
@@ -210,6 +216,7 @@ export const useSettingsStore = defineStore('settings', () => {
     theme,
     terminalThemeName,
     customTerminalThemes,
+    editorMode,
     resetSearchColors,
     setTheme,
     applyTheme,

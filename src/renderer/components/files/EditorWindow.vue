@@ -40,7 +40,7 @@
           <el-button size="small" @click="closeSearch" title="关闭"><el-icon><Close /></el-icon></el-button>
         </div>
         <div v-if="showReplace" class="replace-row">
-          <el-input v-model="replaceText" size="small" placeholder="替换为..." @keyup.enter="replaceOne" @keyup.escape="closeSearch" class="search-input">
+          <el-input v-model="replaceText" size="small" placeholder="替换为..." @input="syncSearchQuery" @keyup.enter="replaceOne" @keyup.escape="closeSearch" class="search-input">
             <template #prefix><el-icon><Edit /></el-icon></template>
           </el-input>
           <el-button size="small" @click="replaceOne">替换</el-button>
@@ -211,8 +211,19 @@ const openFile = async (filePath: string, tabId: string) => {
     const res = await (window as any).electronAPI.readFileContent(tabId, filePath)
     if (!res.success) { ElMessage.error('打开失败：' + (res.error || '')); return }
     const content = res.content || ''
+    // 二进制检测：前 8KB 含 \0 字节则为二进制
+    const head = content.substring(0, 8192)
+    if (head.includes('\0')) {
+      const name = filePath.split('/').pop() || filePath
+      try {
+        await ElMessageBox.confirm(
+          `"${name}" 看起来是二进制文件，在编辑器中可能无法正常显示，确定要打开吗？`,
+          '二进制文件',
+          { confirmButtonText: '仍然打开', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch { return }
+    }
     const len = new TextEncoder().encode(content).length
-    if (len > 5 * 1024 * 1024) { ElMessage.warning('文件过大（>5MB）'); return }
     const name = filePath.split('/').pop() || filePath
     openFiles.value.push({
       path: filePath, name, tabId, content,
@@ -292,9 +303,15 @@ const closeSearch = () => {
   if (editorView.value) editorView.value.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: '' })) })
   matchCurrent.value = 0; matchTotal.value = 0
 }
+const syncSearchQuery = () => {
+  if (!editorView.value) return
+  editorView.value.dispatch({
+    effects: setSearchQuery.of(new SearchQuery({ search: searchText.value, replace: replaceText.value }))
+  })
+}
 const doSearch = () => {
   if (!editorView.value || !searchText.value) { matchCurrent.value = 0; matchTotal.value = 0; return }
-  editorView.value.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: searchText.value })) })
+  syncSearchQuery()
   updateMatchCount()
 }
 const updateMatchCount = () => {

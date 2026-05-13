@@ -20,6 +20,7 @@ export interface FileInfo {
     mode: number;
     isDirectory: boolean;
     isFile: boolean;
+    isSymbolicLink: boolean;
     mtime: number;
     atime: number;
   };
@@ -324,23 +325,57 @@ export class SSHClient extends EventEmitter {
 
       async listDirectory(path: string): Promise<FileInfo[]> {
         const sftp = await this.getSFTP();
-        return new Promise((resolve, reject) => {
-          sftp.readdir(path, (err: Error | undefined, list: any[]) => {
+        const list: any[] = await new Promise((resolve, reject) => {
+          sftp.readdir(path, (err: Error | undefined, items: any[]) => {
             if (err) return reject(err);
-            resolve(list.map((item: any) => ({
-              filename: item.filename,
-              longname: item.longname,
-              attrs: {
-                size: item.attrs.size,
-                mode: item.attrs.mode,
-                isDirectory: (item.attrs.mode & 0o040000) !== 0,
-                isFile: (item.attrs.mode & 0o100000) !== 0,
-                mtime: item.attrs.mtime,
-                atime: item.attrs.atime,
-              }
-            })));
+            resolve(items);
           });
         });
+
+        // 先构建基础信息，过滤 . 和 ..
+        const entries: FileInfo[] = [];
+        const symlinkIndices: number[] = [];
+
+        for (const item of list) {
+          if (item.filename === '.' || item.filename === '..') continue;
+          const isSymlink = (item.attrs.mode & 0o170000) === 0o120000;
+          const idx = entries.length;
+          if (isSymlink) symlinkIndices.push(idx);
+          entries.push({
+            filename: item.filename,
+            longname: item.longname,
+            attrs: {
+              size: item.attrs.size,
+              mode: item.attrs.mode,
+              isDirectory: (item.attrs.mode & 0o040000) !== 0,
+              isFile: (item.attrs.mode & 0o100000) !== 0,
+              isSymbolicLink: isSymlink,
+              mtime: item.attrs.mtime,
+              atime: item.attrs.atime,
+            }
+          });
+        }
+
+        // 对符号链接用 stat（follow symlink）获取目标的真实属性
+        if (symlinkIndices.length > 0) {
+          const dirPrefix = path.endsWith('/') ? path : path + '/';
+          const promises = symlinkIndices.map(idx =>
+            new Promise<void>((resolve) => {
+              const fullPath = dirPrefix + entries[idx].filename;
+              sftp.stat(fullPath, (err: any, targetAttrs: any) => {
+                if (!err && targetAttrs) {
+                  entries[idx].attrs.isDirectory = (targetAttrs.mode & 0o040000) !== 0;
+                  entries[idx].attrs.isFile = (targetAttrs.mode & 0o100000) !== 0;
+                  entries[idx].attrs.size = targetAttrs.size;
+                }
+                resolve(); // 失败也继续，保留原 symlink 属性
+              });
+            })
+          );
+          await Promise.all(promises);
+        }
+
+        return entries;
       }
 
       async uploadFile(localPath: string, remotePath: string, onProgress?: (transferred: number, total: number) => void, transferId?: string): Promise<void> {

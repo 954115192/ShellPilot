@@ -14,7 +14,7 @@
                 class="path-input"
             >
               <template #prefix>
-                <el-icon>
+                <el-icon class="path-root-btn" @click="goToRoot" title="回到根目录">
                   <Folder/>
                 </el-icon>
               </template>
@@ -83,14 +83,17 @@
             >
               <template #default="{ node, data }">
                 <span class="tree-node-label">
-                  <el-icon v-if="data.isSymlink" :size="14" color="#67c23a">
-                    <Folder/>
+                  <el-icon v-if="data.isSymlink && data.isDirectory" :size="14" color="#67c23a">
+                    <FolderOpened/>
+                  </el-icon>
+                  <el-icon v-else-if="data.isSymlink" :size="14" color="#67c23a">
+                    <component :is="getFileIcon(data.label || data.filename || '')"/>
                   </el-icon>
                   <el-icon v-else-if="data.isDirectory" :size="14" color="#f5a623">
                     <Folder/>
                   </el-icon>
                   <el-icon v-else :size="14" color="#409EFF">
-                    <Document/>
+                    <component :is="getFileIcon(data.label || data.filename || '')"/>
                   </el-icon>
                   {{ node.label }}
                 </span>
@@ -119,6 +122,7 @@
               :data="sortedFileList"
               style="width: 100%"
               height="100%"
+              border
               @row-dblclick="handleRowDblClick"
               @sort-change="handleSortChange"
               @row-contextmenu="handleContextMenu"
@@ -127,17 +131,19 @@
             <el-table-column prop="label" label="名称" min-width="200" sortable="custom">
               <template #default="{ row }">
                 <div class="file-name-cell">
-                  <el-icon v-if="row.isDirectory" :size="16" color="#f5a623">
-                    <Folder/>
-                  </el-icon>
-                  <el-icon v-else-if="row.isSymlink" :size="16" color="#67C23A">
+                  <el-icon v-if="row.isSymlink && row.isDirectory" :size="16" color="#67C23A">
                     <FolderOpened/>
                   </el-icon>
+                  <el-icon v-else-if="row.isSymlink" :size="16" color="#67C23A">
+                    <component :is="getFileIcon(row.label)"/>
+                  </el-icon>
+                  <el-icon v-else-if="row.isDirectory" :size="16" color="#f5a623">
+                    <Folder/>
+                  </el-icon>
                   <el-icon v-else :size="16" color="#409EFF">
-                    <Document/>
+                    <component :is="getFileIcon(row.label)"/>
                   </el-icon>
                   <span class="file-name">{{ row.label }}</span>
-                  <span v-if="row.isSymlink" class="symlink-arrow"> →</span>
                 </div>
               </template>
             </el-table-column>
@@ -208,7 +214,7 @@
           </el-dropdown-item>
           <el-dropdown-item
               command="editInline"
-              :disabled="!contextMenuItem || !!contextMenuItem.isDirectory || !isTextFile(contextMenuItem?.label || '')"
+              :disabled="!contextMenuItem || !!contextMenuItem.isDirectory || isBinaryFile(contextMenuItem?.label || '')"
           >
             <el-icon><EditPen/></el-icon> 内置编辑器打开
           </el-dropdown-item>
@@ -288,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import {ref, computed, onMounted, onBeforeUnmount, watch, nextTick} from 'vue';
+import {ref, computed, onMounted, onBeforeUnmount, watch} from 'vue';
 import type {ElTree} from 'element-plus';
 import {
   Folder,
@@ -305,7 +311,18 @@ import {
   Edit,
   FolderAdd,
   DocumentAdd,
-  Lock
+  Lock,
+  Setting,
+  Picture,
+  VideoPlay,
+  Headset,
+  Coin,
+  Box,
+  Memo,
+  Notebook,
+  Printer,
+  Key,
+  Files
 } from '@element-plus/icons-vue';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {getActiveTabId, getActiveSession} from '../../stores/terminalStore';
@@ -515,6 +532,12 @@ const goForward = () => {
   }
 };
 
+const goToRoot = () => {
+  currentPath.value = '/';
+  addToHistory('/');
+  loadDirectoryContent('/');
+};
+
 const goUp = () => {
   if (currentPath.value === '/') return;
 
@@ -579,7 +602,7 @@ const loadNode = async (node: any, resolve: any) => {
 
   const nodeData = node.data as any;
 
-  if (!nodeData.isDirectory && !nodeData.isSymlink) {
+  if (!nodeData.isDirectory) {
     return resolve([]);
   }
 
@@ -608,13 +631,8 @@ const loadDirectoryLevel = async (path: string): Promise<any[]> => {
           continue;
         }
 
-        const isSymlink = file.attrs?.isSymbolicLink ||
-            (file.longname && file.longname.startsWith('l'));
-
-        let isDirectory = file.attrs?.isDirectory || false;
-        if (isSymlink && !file.attrs?.isFile) {
-          isDirectory = true;
-        }
+        const isSymlink = file.attrs?.isSymbolicLink || false;
+        const isDirectory = file.attrs?.isDirectory || false;
 
         const nodePath = normalizePath(path === '/' ? '/' + file.filename : path + '/' + file.filename);
 
@@ -679,15 +697,15 @@ const loadDirectoryContent = async (path: string) => {
           continue;
         }
 
-        const isSymlink = file.attrs?.isSymbolicLink ||
-            (file.longname && file.longname.startsWith('l'));
-
-        let isDirectory = file.attrs?.isDirectory || false;
-        if (isSymlink && !file.attrs?.isFile) {
-          isDirectory = true;
-        }
+        const isSymlink = file.attrs?.isSymbolicLink || false;
+        const isDirectory = file.attrs?.isDirectory || false;
 
         const filePath = normalizePath(normalizedPath === '/' ? '/' + file.filename : normalizedPath + '/' + file.filename);
+
+        let typeLabel = '文件';
+        if (isSymlink && isDirectory) typeLabel = '链接文件夹';
+        else if (isSymlink) typeLabel = '链接文件';
+        else if (isDirectory) typeLabel = '文件夹';
 
         items.push({
           label: file.filename,
@@ -699,7 +717,7 @@ const loadDirectoryContent = async (path: string) => {
           mtimeNum: file.attrs?.mtime,
           owner: file.longname ? extractOwner(file.longname) : undefined,
           group: file.longname ? extractGroup(file.longname) : undefined,
-          typeLabel: isDirectory ? '文件夹' : '文件',
+          typeLabel,
         });
       }
 
@@ -713,7 +731,7 @@ const loadDirectoryContent = async (path: string) => {
 };
 
 const handleTreeClick = (data: any) => {
-  if (data.isDirectory || data.isSymlink) {
+  if (data.isDirectory) {
     currentPath.value = data.path;
     addToHistory(data.path);
     loadDirectoryContent(data.path);
@@ -722,17 +740,60 @@ const handleTreeClick = (data: any) => {
 
 const settingsStore = useSettingsStore();
 
-const TEXT_EXTENSIONS = new Set([
-  'txt','log','md','markdown','json','jsonc','yaml','yml','toml','ini','conf','cfg',
-  'js','mjs','cjs','ts','mts','jsx','tsx','vue','html','htm','css','scss','less','xml','svg',
-  'py','rb','go','rs','java','c','cpp','h','hpp','sh','bash','zsh','fish','ps1','bat','cmd',
-  'sql','env','gitignore','dockerignore','csv','tsv',
+const BINARY_EXTENSIONS = new Set([
+  'exe','dll','so','dylib','bin','dat','db','sqlite','mdb',
+  'zip','tar','gz','bz2','xz','7z','rar','tgz',
+  'png','jpg','jpeg','gif','bmp','ico','webp','svgz','tiff','tif',
+  'mp3','mp4','avi','mkv','mov','wav','flac','ogg','webm',
+  'pdf','doc','docx','xls','xlsx','ppt','pptx',
+  'class','jar','war','pyc','pyo','o','a','lib',
 ]);
-const isTextFile = (name: string): boolean => {
+const isBinaryFile = (name: string): boolean => {
   const ext = name.split('.').pop()?.toLowerCase() || '';
-  if (TEXT_EXTENSIONS.has(ext)) return true;
-  if (!ext || ['dockerfile','makefile','readme','license','changelog'].some(n => name.toLowerCase().startsWith(n))) return true;
-  return false;
+  return BINARY_EXTENSIONS.has(ext);
+};
+
+const FILE_ICON_MAP: Record<string, any> = {
+  // 代码
+  js: Monitor, mjs: Monitor, cjs: Monitor, ts: Monitor, mts: Monitor,
+  jsx: Monitor, tsx: Monitor, vue: Monitor, svelte: Monitor,
+  py: Monitor, go: Monitor, rs: Monitor, java: Monitor,
+  c: Monitor, cpp: Monitor, h: Monitor, hpp: Monitor,
+  rb: Monitor, php: Monitor, swift: Monitor, kt: Monitor, scala: Monitor,
+  sh: Monitor, bash: Monitor, zsh: Monitor, fish: Monitor, ps1: Monitor,
+  // 配置
+  json: Setting, jsonc: Setting, yaml: Setting, yml: Setting,
+  toml: Setting, ini: Setting, cfg: Setting, conf: Setting, env: Setting,
+  // Web
+  html: Monitor, htm: Monitor, css: Monitor, scss: Monitor, less: Monitor,
+  // 图片
+  png: Picture, jpg: Picture, jpeg: Picture, gif: Picture, bmp: Picture,
+  webp: Picture, ico: Picture, svg: Picture, psd: Picture, tiff: Picture,
+  // 视频
+  mp4: VideoPlay, avi: VideoPlay, mkv: VideoPlay, mov: VideoPlay,
+  wmv: VideoPlay, flv: VideoPlay, webm: VideoPlay,
+  // 音频
+  mp3: Headset, wav: Headset, flac: Headset, aac: Headset, ogg: Headset, wma: Headset,
+  // 文档
+  txt: Document, log: Document, md: Document, markdown: Document, rst: Document,
+  // 数据库 / 数据
+  sql: Coin, db: Coin, sqlite: Coin, sqlite3: Coin,
+  // 压缩包
+  zip: Box, tar: Box, gz: Box, bz2: Box, '7z': Box, rar: Box, xz: Box,
+  // Office
+  doc: Memo, docx: Memo, rtf: Memo,
+  xls: Notebook, xlsx: Notebook, csv: Notebook, tsv: Notebook,
+  ppt: Printer, pptx: Printer,
+  pdf: Printer,
+  // 密钥
+  pem: Key, key: Key, pub: Key, crt: Lock, cert: Lock,
+  // 字体
+  ttf: Files, otf: Files, woff: Files, woff2: Files, eot: Files,
+};
+
+const getFileIcon = (name: string) => {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  return FILE_ICON_MAP[ext] || Document;
 };
 
 const openInEditor = async (file: FileItem) => {
@@ -741,8 +802,23 @@ const openInEditor = async (file: FileItem) => {
   await window.electronAPI.openEditorWindow(file.path, file.label, tabId, isDark, settingsStore.editorMode);
 };
 
+const confirmOpenLargeFile = async (file: FileItem): Promise<boolean> => {
+  if (file.size > 5 * 1024 * 1024) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    try {
+      await ElMessageBox.confirm(
+        `文件 "${file.label}" 大小为 ${sizeMB} MB，过大的文件可能导致编辑器卡顿或卡死，确定要打开吗？`,
+        '文件过大',
+        { confirmButtonText: '仍然打开', cancelButtonText: '取消', type: 'warning' }
+      );
+      return true;
+    } catch { return false; }
+  }
+  return true;
+};
+
 const handleRowDblClick = async (row: FileItem) => {
-  if (row.isDirectory || row.isSymlink) {
+  if (row.isDirectory) {
     currentPath.value = row.path;
     addToHistory(row.path);
 
@@ -753,12 +829,10 @@ const handleRowDblClick = async (row: FileItem) => {
     if (treeRef.value) {
       treeRef.value.setCurrentKey(row.path);
     }
-  } else if (isTextFile(row.label) && row.size <= 5 * 1024 * 1024) {
-    openInEditor(row);
-  } else if (row.size > 5 * 1024 * 1024) {
-    ElMessage.warning('文件过大，建议下载后编辑');
-  } else {
+  } else if (isBinaryFile(row.label)) {
     openFileWithLocalProgram(row);
+  } else if (await confirmOpenLargeFile(row)) {
+    openInEditor(row);
   }
 };
 
@@ -825,7 +899,7 @@ const onMenuVisibleChange = (visible: boolean) => {
 };
 
 // el-dropdown 命令处理
-const handleContextMenuCommand = (command: string) => {
+const handleContextMenuCommand = async (command: string) => {
   switch (command) {
     case 'newFolder':
       newFolder();
@@ -843,7 +917,11 @@ const handleContextMenuCommand = (command: string) => {
       openItem(contextMenuItem.value);
       break;
     case 'editInline':
-      if (contextMenuItem.value) openInEditor(contextMenuItem.value);
+      if (contextMenuItem.value) {
+        if (await confirmOpenLargeFile(contextMenuItem.value)) {
+          openInEditor(contextMenuItem.value);
+        }
+      }
       break;
     case 'rename':
       showRenameDialog(contextMenuItem.value);
@@ -1064,7 +1142,7 @@ const doNewFile = async () => {
 // 打开（目录=导航，文件=用本地程序打开）
 const openItem = (item: FileItem | null) => {
   if (!item) return;
-  if (item.isDirectory || item.isSymlink) {
+  if (item.isDirectory) {
     currentPath.value = item.path;
     loadDirectoryContent(item.path);
     expandTreePath(item.path);
@@ -1323,6 +1401,15 @@ const handleMouseSideButtons = (event: MouseEvent) => {
 
 .path-input {
   flex: 1;
+}
+
+.path-root-btn {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.path-root-btn:hover {
+  color: var(--el-color-primary);
 }
 
 .copy-btn {

@@ -9,9 +9,9 @@
     </div>
 
     <div class="saved-section" v-loading="loading">
-      <div class="section-header">
-        <h3 class="section-title">历史连接</h3>
-      </div>
+<!--      <div class="section-header">-->
+<!--&lt;!&ndash;        <h3 class="section-title">历史连接</h3>&ndash;&gt;-->
+<!--      </div>-->
 
       <el-empty v-if="!loading && savedSessions.length === 0" description="暂无历史连接，点击「新建连接」添加服务器" :image-size="100">
         <el-button type="primary" @click="openNewDialog">

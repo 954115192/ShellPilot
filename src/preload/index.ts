@@ -18,6 +18,7 @@ export interface FileInfo {
     mode: number;
     isDirectory: boolean;
     isFile: boolean;
+    isSymbolicLink: boolean;
     mtime: number;
     atime: number;
   };

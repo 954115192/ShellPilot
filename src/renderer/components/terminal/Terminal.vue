@@ -219,8 +219,13 @@
             </template>
           </el-table-column>
           <el-table-column prop="useCount" label="次数" width="70" sortable />
-          <el-table-column label="操作" width="80">
+          <el-table-column label="操作" width="150">
             <template #default="{ row }">
+              <el-tooltip content="添加为全局快捷命令" placement="top" :show-after="500">
+                <el-button size="small" type="primary" plain @click="addAsQuickCommand(row.command)">
+                  <el-icon><CirclePlus /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-button size="small" type="danger" plain @click="deleteHistoryItem(row.command)">删除</el-button>
             </template>
           </el-table-column>
@@ -262,7 +267,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import { SearchAddon } from 'xterm-addon-search';
 import 'xterm/css/xterm.css';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Delete, Connection, CircleCheck, CircleClose, FolderOpened, DataLine, CopyDocument, Upload, Download, Search, Clock, Close, Promotion, MagicStick } from '@element-plus/icons-vue';
+import { Delete, Connection, CircleCheck, CircleClose, FolderOpened, DataLine, CopyDocument, Upload, Download, Search, Clock, Close, Promotion, MagicStick, CirclePlus } from '@element-plus/icons-vue';
 import FileBrowser from '../files/FileBrowser.vue';
 import StatsView from '../../views/StatsView.vue';
 import CommandSuggestion from './CommandSuggestion.vue';
@@ -895,6 +900,17 @@ const deleteHistoryItem = async (command: string) => {
     commandStore.deleteFrequentCommand(connKey.value, command)
     ElMessage.success('删除成功')
   } catch {}
+}
+
+const addAsQuickCommand = (command: string) => {
+  const exists = commandStore.quickCommands.some(c => c.command === command)
+  if (exists) {
+    ElMessage.info('该命令已在全局快捷命令中')
+    return
+  }
+  const name = command.length > 20 ? command.substring(0, 20) + '...' : command
+  commandStore.addQuickCommand({ name, command })
+  ElMessage.success('已添加为全局快捷命令')
 }
 
 const clearHistory = async () => {

@@ -123,6 +123,23 @@
           </div>
         </el-collapse-item>
 
+        <!-- 文件传输设置 -->
+        <el-collapse-item title="文件传输" name="transfer">
+          <div class="editor-setting">
+            <label>最大同时下载数</label>
+            <el-slider
+              v-model="settingsStore.maxConcurrentDownloads"
+              :min="1"
+              :max="10"
+              :step="1"
+              show-stops
+              show-input
+              :marks="{ 1: '1', 3: '3', 5: '5', 10: '10' }"
+            />
+            <p class="setting-hint">同时下载的文件数量，推荐 3-5。过大可能导致服务器限速或连接被拒。</p>
+          </div>
+        </el-collapse-item>
+
         <!-- SSH 密钥管理 -->
         <el-collapse-item title="SSH 密钥管理" name="keys">
           <div class="keys-section">

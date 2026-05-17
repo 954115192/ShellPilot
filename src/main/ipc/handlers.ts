@@ -121,7 +121,7 @@ export function registerIPCHandlers(): void {
       const win = BrowserWindow.fromWebContents(event.sender)
       await ipcRegistry.uploadFile(filePath, remotePath, tabId, (transferred, total) => {
         if (win) {
-          win.webContents.send('transfer-progress', { tabId, type: 'upload', transferred, total })
+          win.webContents.send('transfer-progress', { tabId, type: 'upload', transferred, total, transferId })
         }
       }, transferId)
       return { success: true }
@@ -136,12 +136,45 @@ export function registerIPCHandlers(): void {
       const win = BrowserWindow.fromWebContents(event.sender)
       await ipcRegistry.downloadFile(remotePath, filePath, tabId, (transferred, total) => {
         if (win) {
-          win.webContents.send('transfer-progress', { tabId, type: 'download', transferred, total })
+          win.webContents.send('transfer-progress', { tabId, type: 'download', transferred, total, transferId })
         }
       }, transferId)
       return { success: true }
     } catch (error) {
       console.error('[IPC Handler] download-file error:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('download-directory', async (event, remotePath, localPath, tabId, baseTransferId) => {
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const abortSignal = ipcRegistry.registerAbortSignal(tabId, baseTransferId)
+      await ipcRegistry.downloadDirectory(remotePath, localPath, tabId, {
+        onStart: (totalFiles, totalSize) => {
+          if (win) {
+            win.webContents.send('transfer-progress', {
+              tabId, type: 'download', transferred: 0, total: totalSize,
+              transferId: baseTransferId,
+              dirStart: { totalFiles, totalSize }
+            })
+          }
+        },
+        onProgress: (transferred, total, fileName, fileIndex, totalFiles) => {
+          if (win) {
+            win.webContents.send('transfer-progress', {
+              tabId, type: 'download', transferred, total,
+              transferId: baseTransferId,
+              dirFileDone: fileName,
+              dirFileIndex: fileIndex,
+              dirTotalFiles: totalFiles
+            })
+          }
+        }
+      }, abortSignal || undefined)
+      return { success: true }
+    } catch (error) {
+      console.error('[IPC Handler] download-directory error:', error)
       return { success: false, error: (error as Error).message }
     }
   })
@@ -274,6 +307,14 @@ export function registerIPCHandlers(): void {
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openFile'],
       filters: [{ name: 'All Files', extensions: ['*'] }]
+    })
+    return result
+  })
+
+  ipcMain.handle('select-directory-dialog', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory'],
     })
     return result
   })

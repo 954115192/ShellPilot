@@ -10,6 +10,7 @@ declare global {
       getWorkingDirectory: (tabId: string) => Promise<{ success: boolean; directory: string; error?: string }>;
       uploadFile: (filePath: string, remotePath: string, tabId: string, transferId?: string) => Promise<{ success: boolean }>;
       downloadFile: (remotePath: string, filePath: string, tabId: string, transferId?: string) => Promise<{ success: boolean }>;
+      downloadDirectory: (remotePath: string, localPath: string, tabId: string, transferId: string) => Promise<{ success: boolean; error?: string }>;
       createDirectory: (remotePath: string, tabId: string) => Promise<{ success: boolean }>;
       listDirectory: (path: string, tabId: string) => Promise<{ success: boolean; files: FileInfo[]; error?: string }>;
       readFileContent: (tabId: string, remotePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
@@ -34,6 +35,7 @@ declare global {
       cancelTransfer: (tabId: string, transferId: string) => Promise<{ success: boolean }>;
       showSaveDialog: (options?: { defaultName?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
       showOpenDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+      showDirectoryDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
 
       createShellStream: (tabId: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
       writeToShell: (tabId: string, data: string) => Promise<{ success: boolean; error?: string }>;

@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getWorkingDirectory: (tabId: string) => ipcRenderer.invoke('get-working-directory', tabId),
   uploadFile: (filePath: string, remotePath: string, tabId: string, transferId?: string) => ipcRenderer.invoke('upload-file', filePath, remotePath, tabId, transferId),
   downloadFile: (remotePath: string, filePath: string, tabId: string, transferId?: string) => ipcRenderer.invoke('download-file', remotePath, filePath, tabId, transferId),
+  downloadDirectory: (remotePath: string, localPath: string, tabId: string, transferId: string) => ipcRenderer.invoke('download-directory', remotePath, localPath, tabId, transferId),
   createDirectory: (remotePath: string, tabId: string) => ipcRenderer.invoke('create-directory', remotePath, tabId),
   listDirectory: (path: string, tabId: string) => ipcRenderer.invoke('list-directory', path, tabId),
   readFileContent: (tabId: string, remotePath: string) => ipcRenderer.invoke('file:read-content', tabId, remotePath),
@@ -117,6 +118,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelTransfer: (tabId: string, transferId: string) => ipcRenderer.invoke('cancel-transfer', tabId, transferId),
   showSaveDialog: (options?: { defaultName?: string }) => ipcRenderer.invoke('select-save-dialog', options),
   showOpenDialog: () => ipcRenderer.invoke('select-open-dialog'),
+  showDirectoryDialog: () => ipcRenderer.invoke('select-directory-dialog'),
 
   createShellStream: (tabId: string, cols: number, rows: number) => ipcRenderer.invoke('create-shell-stream', tabId, cols, rows),
   writeToShell: (tabId: string, data: string) => ipcRenderer.invoke('write-to-shell', tabId, data),

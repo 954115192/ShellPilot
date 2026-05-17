@@ -160,12 +160,29 @@ export class IPCRegistry {
     await client.downloadFile(remotePath, filePath, onProgress, transferId)
   }
 
+  async downloadDirectory(remotePath: string, localPath: string, tabId: string, callbacks?: {
+    onStart?: (totalFiles: number, totalSize: number) => void
+    onProgress?: (transferred: number, total: number, fileName: string, fileIndex: number, totalFiles: number) => void
+  }, abortSignal?: { aborted: boolean }): Promise<void> {
+    const client = this.sshClients.get(tabId);
+    if (!client) {
+      throw new Error('未连接 SSH')
+    }
+    await client.downloadDirectory(remotePath, localPath, callbacks, abortSignal)
+  }
+
   // 取消传输
   cancelTransfer(tabId: string, transferId: string): void {
     const client = this.sshClients.get(tabId);
     if (client) {
       client.cancelTransfer(transferId)
     }
+  }
+
+  registerAbortSignal(tabId: string, transferId: string): { aborted: boolean } | null {
+    const client = this.sshClients.get(tabId);
+    if (!client) return null;
+    return client.registerAbortSignal(transferId)
   }
 
   async createDirectory(remotePath: string, tabId: string): Promise<void> {

@@ -205,7 +205,7 @@
           </el-dropdown-item>
           <el-dropdown-item
               command="download"
-              :disabled="!contextMenuItem || contextMenuItem.isDirectory"
+              :disabled="!contextMenuItem"
           >
             <el-icon><Download/></el-icon> 下载
           </el-dropdown-item>
@@ -224,6 +224,34 @@
           </el-dropdown-item>
           <el-dropdown-item command="changePermissions" :disabled="!contextMenuItem">
             <el-icon><Lock/></el-icon> 权限修改
+          </el-dropdown-item>
+
+          <el-dropdown-item
+              command="copy"
+              :disabled="!contextMenuItem"
+              divided
+          >
+            <el-icon><CopyDocument/></el-icon> 复制
+          </el-dropdown-item>
+          <el-dropdown-item
+              command="paste"
+              :disabled="!clipboard"
+          >
+            <el-icon><DocumentCopy/></el-icon> 粘贴
+          </el-dropdown-item>
+
+          <el-dropdown-item
+              command="compress"
+              :disabled="!contextMenuItem || !contextMenuItem.isDirectory"
+              divided
+          >
+            <el-icon><Box/></el-icon> 压缩 (tar.gz)
+          </el-dropdown-item>
+          <el-dropdown-item
+              command="decompress"
+              :disabled="!contextMenuItem || !isArchiveFile(contextMenuItem?.label || '')"
+          >
+            <el-icon><Files/></el-icon> 解压
           </el-dropdown-item>
 
           <el-dropdown-item command="delete" :disabled="!contextMenuItem" divided>
@@ -312,6 +340,7 @@ import {
   FolderAdd,
   DocumentAdd,
   Lock,
+  CopyDocument,
   Setting,
   Picture,
   VideoPlay,
@@ -375,6 +404,7 @@ const treeProps = {
 const contextMenuItem = ref<FileItem | null>(null);
 const contextMenuDropdownRef = ref();
 const contextMenuVisible = ref(false);
+const clipboard = ref<{ item: FileItem; action: 'copy' } | null>(null);
 const position = ref({
   top: 0,
   left: 0,
@@ -753,6 +783,13 @@ const isBinaryFile = (name: string): boolean => {
   return BINARY_EXTENSIONS.has(ext);
 };
 
+const isArchiveFile = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar.bz2') ||
+    lower.endsWith('.tar.xz') || lower.endsWith('.tar') || lower.endsWith('.gz') ||
+    lower.endsWith('.zip') || lower.endsWith('.rar') || lower.endsWith('.7z');
+};
+
 const FILE_ICON_MAP: Record<string, any> = {
   // 代码
   js: Monitor, mjs: Monitor, cjs: Monitor, ts: Monitor, mts: Monitor,
@@ -899,6 +936,97 @@ const onMenuVisibleChange = (visible: boolean) => {
 };
 
 // el-dropdown 命令处理
+// 复制/粘贴
+const copyItem = (item: FileItem | null) => {
+  if (!item) return;
+  clipboard.value = { item, action: 'copy' };
+  ElMessage.success(`已复制 "${item.label}"`);
+};
+
+const pasteItem = async () => {
+  if (!clipboard.value) return;
+  const tabId = getTabId();
+  if (!tabId) return;
+  const src = clipboard.value.item;
+  const destDir = currentPath.value;
+  const destPath = destDir === '/' ? '/' + src.label : destDir + '/' + src.label;
+  const cmd = src.isDirectory ? `cp -a "${src.path}" "${destPath}"` : `cp "${src.path}" "${destPath}"`;
+  try {
+    const result = await window.electronAPI.executeCommand(cmd, tabId);
+    if (result.success) {
+      ElMessage.success('粘贴成功');
+      loadDirectoryContent(currentPath.value);
+      clipboard.value = null;
+    } else {
+      ElMessage.error('粘贴失败：' + (result.error || result.output || ''));
+    }
+  } catch (e) {
+    ElMessage.error('粘贴失败：' + (e as Error).message);
+  }
+};
+
+// 压缩
+const compressItem = async (item: FileItem | null) => {
+  if (!item || !item.isDirectory) return;
+  const tabId = getTabId();
+  if (!tabId) return;
+  const parentPath = item.path.substring(0, item.path.lastIndexOf('/')) || '/';
+  const archiveName = item.label + '.tar.gz';
+  const archivePath = parentPath === '/' ? '/' + archiveName : parentPath + '/' + archiveName;
+  try {
+    ElMessage.info('正在压缩...');
+    const result = await window.electronAPI.executeCommand(
+      `tar -czf "${archivePath}" -C "${parentPath}" "${item.label}"`, tabId
+    );
+    if (result.success) {
+      ElMessage.success('压缩完成：' + archiveName);
+      loadDirectoryContent(currentPath.value);
+    } else {
+      ElMessage.error('压缩失败：' + (result.error || result.output || ''));
+    }
+  } catch (e) {
+    ElMessage.error('压缩失败：' + (e as Error).message);
+  }
+};
+
+// 解压
+const decompressItem = async (item: FileItem | null) => {
+  if (!item) return;
+  const tabId = getTabId();
+  if (!tabId) return;
+  const parentPath = item.path.substring(0, item.path.lastIndexOf('/')) || '/';
+  const lower = item.label.toLowerCase();
+  let cmd = '';
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    cmd = `tar -xzf "${item.path}" -C "${parentPath}"`;
+  } else if (lower.endsWith('.tar.bz2')) {
+    cmd = `tar -xjf "${item.path}" -C "${parentPath}"`;
+  } else if (lower.endsWith('.tar.xz')) {
+    cmd = `tar -xJf "${item.path}" -C "${parentPath}"`;
+  } else if (lower.endsWith('.tar')) {
+    cmd = `tar -xf "${item.path}" -C "${parentPath}"`;
+  } else if (lower.endsWith('.gz')) {
+    cmd = `gunzip -k "${item.path}"`;
+  } else if (lower.endsWith('.zip')) {
+    cmd = `unzip -o "${item.path}" -d "${parentPath}"`;
+  } else {
+    ElMessage.warning('暂不支持该压缩格式');
+    return;
+  }
+  try {
+    ElMessage.info('正在解压...');
+    const result = await window.electronAPI.executeCommand(cmd, tabId);
+    if (result.success) {
+      ElMessage.success('解压完成');
+      loadDirectoryContent(currentPath.value);
+    } else {
+      ElMessage.error('解压失败：' + (result.error || result.output || ''));
+    }
+  } catch (e) {
+    ElMessage.error('解压失败：' + (e as Error).message);
+  }
+};
+
 const handleContextMenuCommand = async (command: string) => {
   switch (command) {
     case 'newFolder':
@@ -929,11 +1057,69 @@ const handleContextMenuCommand = async (command: string) => {
     case 'changePermissions':
       changePermissions(contextMenuItem.value);
       break;
+    case 'copy':
+      copyItem(contextMenuItem.value);
+      break;
+    case 'paste':
+      await pasteItem();
+      break;
+    case 'compress':
+      await compressItem(contextMenuItem.value);
+      break;
+    case 'decompress':
+      await decompressItem(contextMenuItem.value);
+      break;
     case 'delete':
       deleteItem(contextMenuItem.value);
       break;
   }
 };
+
+// ---- 下载队列 ----
+interface DownloadQueueItem {
+  id: string; tabId: string; type: 'file' | 'directory'
+  remotePath?: string; localPath?: string
+  dirLocalPath?: string; dirBaseTransferId?: string
+}
+const downloadQueue = ref<DownloadQueueItem[]>([])
+const activeDownloads = ref(0)
+
+const processDownloadQueue = () => {
+  while (activeDownloads.value < settingsStore.maxConcurrentDownloads && downloadQueue.value.length > 0) {
+    const item = downloadQueue.value.shift()!
+    activeDownloads.value++
+    transferStore.startTransfer(item.id)
+
+    if (item.type === 'file') {
+      window.electronAPI.downloadFile(item.remotePath!, item.localPath!, item.tabId, item.id).then((result: any) => {
+        if (result.success) {
+          transferStore.completeTransfer(item.id)
+        } else {
+          transferStore.failTransfer(item.id, result.error || '下载失败')
+        }
+      }).catch((err: Error) => {
+        transferStore.failTransfer(item.id, err.message)
+      }).finally(() => {
+        activeDownloads.value--
+        processDownloadQueue()
+      })
+    } else {
+      window.electronAPI.downloadDirectory(item.remotePath!, item.dirLocalPath!, item.tabId, item.dirBaseTransferId!).then((result: any) => {
+        if (result.success) {
+          transferStore.completeTransfer(item.dirBaseTransferId!)
+          ElMessage.success('文件夹下载成功')
+        } else {
+          transferStore.failTransfer(item.dirBaseTransferId!, result.error || '下载失败')
+        }
+      }).catch((err: Error) => {
+        transferStore.failTransfer(item.dirBaseTransferId!, err.message)
+      }).finally(() => {
+        activeDownloads.value--
+        processDownloadQueue()
+      })
+    }
+  }
+}
 
 const downloadFile = async (item: FileItem | null) => {
   if (!item) return;
@@ -944,27 +1130,49 @@ const downloadFile = async (item: FileItem | null) => {
   }
 
   try {
-    // 弹出保存对话框让用户选择本地保存位置
-    const dialogResult = await window.electronAPI.showSaveDialog({defaultName: item.label});
-    if (dialogResult.canceled || !dialogResult.filePath) return;
+    if (item.isDirectory) {
+      // 文件夹下载：加入队列
+      const dialogResult = await window.electronAPI.showDirectoryDialog();
+      if (dialogResult.canceled || !dialogResult.filePaths?.[0]) return;
+      const localPath = dialogResult.filePaths[0] + '/' + item.label;
 
-    // 添加到传输记录
-    const transferId = transferStore.addTransfer({
-      tabId,
-      name: item.label,
-      path: item.path,
-      type: 'download',
-      size: item.size || 0,
-    });
-    transferStore.startTransfer(transferId);
+      const baseTransferId = transferStore.addTransfer({
+        tabId,
+        name: item.label + '/',
+        path: item.path,
+        type: 'download',
+        size: 0,
+      });
 
-    const result = await window.electronAPI.downloadFile(item.path, dialogResult.filePath, tabId, transferId);
-    if (result.success) {
-      transferStore.completeTransfer(transferId);
-      ElMessage.success('文件下载成功');
+      if (activeDownloads.value >= settingsStore.maxConcurrentDownloads) {
+        transferStore.transfers.find(t => t.id === baseTransferId)!.status = 'waiting'
+      }
+      downloadQueue.value.push({
+        id: baseTransferId, tabId, type: 'directory',
+        remotePath: item.path, dirLocalPath: localPath, dirBaseTransferId: baseTransferId
+      })
+      processDownloadQueue()
     } else {
-      transferStore.failTransfer(transferId, '下载失败');
-      ElMessage.error('文件下载失败');
+      // 单文件下载：加入队列
+      const dialogResult = await window.electronAPI.showSaveDialog({defaultName: item.label});
+      if (dialogResult.canceled || !dialogResult.filePath) return;
+
+      const transferId = transferStore.addTransfer({
+        tabId,
+        name: item.label,
+        path: item.path,
+        type: 'download',
+        size: item.size || 0,
+      });
+
+      if (activeDownloads.value >= settingsStore.maxConcurrentDownloads) {
+        transferStore.transfers.find(t => t.id === transferId)!.status = 'waiting'
+      }
+      downloadQueue.value.push({
+        id: transferId, tabId, type: 'file',
+        remotePath: item.path, localPath: dialogResult.filePath
+      })
+      processDownloadQueue()
     }
   } catch (error) {
     ElMessage.error('下载失败：' + (error as Error).message);
@@ -1317,14 +1525,50 @@ watch(() => getActiveTabId(), () => {
 });
 
 // 监听传输进度
-const handleTransferProgress = (data: { tabId: string, type: string, transferred: number, total: number }) => {
+const handleTransferProgress = (data: {
+  tabId: string; type: string; transferred: number; total: number;
+  transferId?: string; dirStart?: { totalFiles: number; totalSize: number };
+  dirFileDone?: string; dirFileIndex?: number; dirTotalFiles?: number
+}) => {
   const currentTabId = getTabId()
-  if (data.tabId === currentTabId) {
-    const transfer = transferStore.findActiveTransfer(data.tabId, data.type as 'upload' | 'download')
-    if (transfer) {
-      transferStore.updateProgress(transfer.id, data.transferred, data.total)
-    }
+  if (data.tabId !== currentTabId || !data.transferId) return
+
+  const transfer = transferStore.transfers.find(t => t.id === data.transferId)
+  if (!transfer) return
+
+  // 文件夹开始：设置总大小 + 文件数
+  if (data.dirStart) {
+    transfer.size = data.dirStart.totalSize
+    transfer.name = transfer.name.replace(/\/$/, ` (${data.dirStart.totalFiles} 个文件)`)
+    return
   }
+
+  // 文件夹进度：实时更新字节 + 速度 + 文件计数
+  if (data.dirFileDone) {
+    transfer.transferred = data.transferred
+    transfer.size = data.total
+    if (data.dirFileIndex && data.dirTotalFiles) {
+      const baseName = transfer.name.replace(/ \(\d+\/\d+ 个文件\)$/, '').replace(/ \(\d+ 个文件\)$/, '')
+      transfer.name = `${baseName} (${data.dirFileIndex}/${data.dirTotalFiles} 个文件)`
+    }
+    // 更新速度
+    const now = Date.now()
+    if (transfer._lastSpeedTime && transfer._lastTransferred !== undefined) {
+      const dt = (now - transfer._lastSpeedTime) / 1000
+      if (dt >= 0.5) {
+        transfer.speed = Math.round((data.transferred - transfer._lastTransferred) / dt)
+        transfer._lastTransferred = data.transferred
+        transfer._lastSpeedTime = now
+      }
+    } else {
+      transfer._lastTransferred = data.transferred
+      transfer._lastSpeedTime = now
+    }
+    return
+  }
+
+  // 普通单文件进度
+  transferStore.updateProgress(data.transferId, data.transferred, data.total)
 }
 
 onMounted(() => {

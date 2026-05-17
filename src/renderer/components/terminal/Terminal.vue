@@ -154,14 +154,13 @@
                     <el-icon><Close /></el-icon>
                   </el-button>
                 </div>
-                <div v-if="item.status === 'transferring'" class="transfer-progress-bar">
+                <div v-if="item.status === 'transferring' || item.status === 'waiting'" class="transfer-progress-bar">
                   <el-progress
-                    v-if="item.size > 0"
-                    :percentage="Math.round((item.transferred / item.size) * 100)"
+                    :percentage="item.size > 0 ? Math.round((item.transferred / item.size) * 100) : 0"
                     :stroke-width="6"
-                    :format="(p: number) => formatSize(item.transferred) + '/' + formatSize(item.size)"
+                    :format="item.size > 0 ? (p: number) => formatSize(item.transferred) + '/' + formatSize(item.size) : () => '准备中...'"
                   />
-                  <span v-else class="transfer-status-text">传输中...</span>
+                  <span v-if="item.speed > 0" class="transfer-speed">{{ formatSize(item.speed) }}/s</span>
                 </div>
                 <div v-else-if="item.status === 'completed'" class="transfer-done">
                   <span>{{ formatSize(item.size) }}</span>
@@ -349,6 +348,7 @@ const selectedText = ref('')
 const getStatusType = (status: string) => {
   switch (status) {
     case 'transferring': return 'warning'
+    case 'waiting': return 'info'
     case 'completed': return 'success'
     case 'failed': return 'danger'
     default: return 'info'
@@ -357,7 +357,8 @@ const getStatusType = (status: string) => {
 
 const getStatusText = (status: string) => {
   switch (status) {
-    case 'pending': return '等待'
+    case 'pending': return '准备中'
+    case 'waiting': return '等待中'
     case 'transferring': return '传输中'
     case 'completed': return '完成'
     case 'failed': return '失败'
@@ -1128,6 +1129,9 @@ watch(connected, (newVal) => {
   // 连接状态变化时无需在终端显示消息
 });
 
+// 定时清理过期速度
+let speedTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   initTerminal();
 
@@ -1141,10 +1145,13 @@ onMounted(() => {
       });
     });
   }
+
+  speedTimer = setInterval(() => transferStore.clearStaleSpeeds(), 1000)
 });
 
 onBeforeUnmount(() => {
   stopFollowingCursor()
+  if (speedTimer) { clearInterval(speedTimer); speedTimer = null }
 
   if (pasteHandler && terminalRef.value) {
     terminalRef.value.removeEventListener('paste', pasteHandler, true);
@@ -1430,6 +1437,10 @@ defineExpose({ focus });
   background: var(--el-color-warning-light-9);
 }
 
+.transfer-item.waiting {
+  background: var(--el-color-info-light-9);
+}
+
 .transfer-item.completed {
   background: var(--el-color-success-light-9);
 }
@@ -1491,6 +1502,12 @@ defineExpose({ focus });
 
 .transfer-progress-bar :deep(.el-progress-bar__outer) {
   background-color: var(--el-fill-color);
+}
+
+.transfer-speed {
+  font-size: 11px;
+  color: var(--el-color-success);
+  white-space: nowrap;
 }
 
 .transfer-done {

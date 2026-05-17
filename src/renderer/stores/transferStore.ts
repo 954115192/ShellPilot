@@ -9,10 +9,13 @@ export interface TransferItem {
   type: 'upload' | 'download'
   size: number
   transferred: number
-  status: 'pending' | 'transferring' | 'completed' | 'failed'
+  speed: number
+  status: 'pending' | 'waiting' | 'transferring' | 'completed' | 'failed'
   startTime: number
   endTime?: number
   error?: string
+  _lastTransferred?: number
+  _lastSpeedTime?: number
 }
 
 export const useTransferStore = defineStore('transfer', () => {
@@ -32,13 +35,14 @@ export const useTransferStore = defineStore('transfer', () => {
     return totalSize > 0 ? Math.round((totalTransferred / totalSize) * 100) : 0
   })
 
-  function addTransfer(item: Omit<TransferItem, 'id' | 'status' | 'startTime' | 'transferred'>): string {
+  function addTransfer(item: Omit<TransferItem, 'id' | 'status' | 'startTime' | 'transferred' | 'speed'>): string {
     const id = 'transfer-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
     transfers.value.unshift({
       ...item,
       id,
       status: 'pending',
       transferred: 0,
+      speed: 0,
       startTime: Date.now(),
     })
     return id
@@ -53,14 +57,25 @@ export const useTransferStore = defineStore('transfer', () => {
 
   function updateProgress(id: string, transferred: number, total: number) {
     const item = transfers.value.find(t => t.id === id)
-    if (item) {
-      item.transferred = transferred
-      if (total > 0 && item.size === 0) {
-        item.size = total
+    if (!item) return
+
+    // 计算速度
+    const now = Date.now()
+    if (item._lastSpeedTime && item._lastTransferred !== undefined) {
+      const dt = (now - item._lastSpeedTime) / 1000
+      if (dt > 0) {
+        item.speed = Math.round((transferred - item._lastTransferred) / dt)
       }
-      if (item.status === 'pending') {
-        item.status = 'transferring'
-      }
+    }
+    item._lastTransferred = transferred
+    item._lastSpeedTime = now
+
+    item.transferred = transferred
+    if (total > 0 && item.size === 0) {
+      item.size = total
+    }
+    if (item.status === 'pending' || item.status === 'waiting') {
+      item.status = 'transferring'
     }
   }
 
@@ -69,6 +84,7 @@ export const useTransferStore = defineStore('transfer', () => {
     if (item) {
       item.status = 'completed'
       item.transferred = item.size || item.transferred
+      item.speed = 0
       item.endTime = Date.now()
     }
   }
@@ -94,11 +110,14 @@ export const useTransferStore = defineStore('transfer', () => {
     transfers.value = []
   }
 
-  // 根据 tabId 和类型找到最新的活跃传输
-  function findActiveTransfer(tabId: string, type: 'upload' | 'download'): TransferItem | undefined {
-    return transfers.value.find(t =>
-      t.tabId === tabId && t.status === 'transferring' && t.type === type
-    )
+  // 清理超过 2 秒没更新的传输速度
+  function clearStaleSpeeds() {
+    const now = Date.now()
+    for (const t of transfers.value) {
+      if (t.status === 'transferring' && t._lastSpeedTime && now - t._lastSpeedTime > 2000) {
+        t.speed = 0
+      }
+    }
   }
 
   return {
@@ -114,6 +133,6 @@ export const useTransferStore = defineStore('transfer', () => {
     removeTransfer,
     clearCompleted,
     clearAll,
-    findActiveTransfer,
+    clearStaleSpeeds,
   }
 })

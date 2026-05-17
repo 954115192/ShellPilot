@@ -323,6 +323,18 @@ export class SSHClient extends EventEmitter {
         }
       }
 
+      // 注册取消信号（供 downloadDirectory 等方法使用）
+      registerAbortSignal(transferId: string): { aborted: boolean } {
+        const controller = new AbortController();
+        this.abortControllers.set(transferId, controller);
+        const signal = { aborted: false };
+        controller.signal.addEventListener('abort', () => {
+          signal.aborted = true;
+          this.abortControllers.delete(transferId);
+        });
+        return signal;
+      }
+
       async listDirectory(path: string): Promise<FileInfo[]> {
         const sftp = await this.getSFTP();
         const list: any[] = await new Promise((resolve, reject) => {
@@ -528,6 +540,102 @@ export class SSHClient extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  async downloadDirectory(
+    remotePath: string,
+    localPath: string,
+    callbacks?: {
+      onStart?: (totalFiles: number, totalSize: number) => void
+      onProgress?: (transferred: number, total: number, fileName: string, fileIndex: number, totalFiles: number) => void
+    },
+    abortSignal?: { aborted: boolean }
+  ): Promise<void> {
+    const path = require('path');
+    const sftp = await this.getSFTP();
+
+    // 递归列出目录所有文件（含大小）
+    const listFiles = async (dir: string): Promise<Array<{ remote: string; local: string; size: number }>> => {
+      const entries: any[] = await new Promise((resolve, reject) => {
+        sftp.readdir(dir, (err: any, list: any[]) => {
+          if (err) return reject(err);
+          resolve(list || []);
+        });
+      });
+
+      const files: Array<{ remote: string; local: string; size: number }> = [];
+      for (const entry of entries) {
+        if (entry.filename === '.' || entry.filename === '..') continue;
+        const remoteFull = dir + '/' + entry.filename;
+        const localFull = path.join(localPath, path.relative(remotePath, remoteFull));
+        const isDir = (entry.attrs.mode & 0o040000) !== 0;
+        const isSymlink = (entry.attrs.mode & 0o170000) === 0o120000;
+
+        if (isSymlink) {
+          try {
+            const stat: any = await new Promise((resolve) => {
+              sftp.stat(remoteFull, (err: any, attrs: any) => resolve(err ? null : attrs));
+            });
+            if (stat && (stat.mode & 0o040000) !== 0) {
+              files.push(...await listFiles(remoteFull));
+            } else {
+              files.push({ remote: remoteFull, local: localFull, size: stat?.size || 0 });
+            }
+          } catch {
+            files.push({ remote: remoteFull, local: localFull, size: 0 });
+          }
+        } else if (isDir) {
+          files.push(...await listFiles(remoteFull));
+        } else {
+          files.push({ remote: remoteFull, local: localFull, size: entry.attrs.size || 0 });
+        }
+      }
+      return files;
+    };
+
+    const allFiles = await listFiles(remotePath);
+    const totalSize = allFiles.reduce((sum, f) => sum + f.size, 0);
+    const totalFiles = allFiles.length;
+
+    // 通知前端：文件列表已确定，总大小已知
+    if (callbacks?.onStart) {
+      callbacks.onStart(totalFiles, totalSize);
+    }
+
+    // 创建本地目录结构
+    const dirs = new Set(allFiles.map(f => path.dirname(f.local)));
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // 逐个下载文件，step 回调实时报告进度
+    let dirTransferred = 0;
+    for (let i = 0; i < allFiles.length; i++) {
+      const file = allFiles[i];
+      if (abortSignal?.aborted) throw new Error('传输已取消');
+      const fileName = file.remote.split('/').pop() || file.remote;
+      let fileTransferred = 0;
+
+      await new Promise<void>((resolve, reject) => {
+        const options: any = {};
+        if (file.size > 0) {
+          options.step = (transferred: number, _chunk: any, _total: number) => {
+            fileTransferred = transferred;
+            if (callbacks?.onProgress) {
+              callbacks.onProgress(dirTransferred + transferred, totalSize, fileName, i + 1, totalFiles);
+            }
+          };
+        }
+        sftp.fastGet(file.remote, file.local, options, (err: any) => {
+          if (err) return reject(err);
+          dirTransferred += file.size;
+          if (callbacks?.onProgress) {
+            callbacks.onProgress(dirTransferred, totalSize, fileName, i + 1, totalFiles);
+          }
+          resolve();
+        });
+      });
+    }
   }
 
   async deleteDirectory(remotePath: string): Promise<void> {

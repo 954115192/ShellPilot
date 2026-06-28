@@ -8,7 +8,6 @@
           <div class="path-bar">
             <el-input
                 v-model="currentPath"
-                placeholder="/"
                 size="small"
                 @keyup.enter="navigateToPath"
                 class="path-input"
@@ -19,15 +18,21 @@
                 </el-icon>
               </template>
               <template #suffix>
-                <el-button
-                    link
-                    size="small"
-                    @click="copyPath"
-                    title="复制路径"
-                    class="copy-btn"
-                >
+<!--                <el-button-->
+<!--                    link-->
+<!--                    size="small"-->
+<!--                    @click="copyPath"-->
+<!--                    title="复制路径"-->
+<!--                    class="copy-btn"-->
+<!--                >-->
+<!--                  <el-icon>-->
+<!--                    <DocumentCopy/>-->
+<!--                  </el-icon>-->
+<!--                </el-button>-->
+
+                <el-button link size="small" @click="cdToTerminal" :disabled="!isConnected" title="复制路径">
                   <el-icon>
-                    <DocumentCopy/>
+                    <Monitor/>
                   </el-icon>
                 </el-button>
               </template>
@@ -37,6 +42,13 @@
                 <ArrowUp/>
               </el-icon>
             </el-button>
+<!--            <el-tooltip content="终端 cd 到此目录" placement="top" :show-after="500">-->
+<!--              <el-button size="small" @click="cdToTerminal" :disabled="!isConnected">-->
+<!--                <el-icon>-->
+<!--                  <Monitor/>-->
+<!--                </el-icon>-->
+<!--              </el-button>-->
+<!--            </el-tooltip>-->
             <el-button type="primary" size="small" @click="refreshTree">
               <el-icon>
                 <Refresh/>
@@ -566,6 +578,17 @@ const goToRoot = () => {
   currentPath.value = '/';
   addToHistory('/');
   loadDirectoryContent('/');
+};
+
+const cdToTerminal = async () => {
+  const tabId = getTabId();
+  if (!tabId) return;
+  try {
+    await window.electronAPI.writeToShell(tabId, `cd ${currentPath.value}\r`);
+    ElMessage.success('已切换到 ' + currentPath.value);
+  } catch (e) {
+    ElMessage.error('切换失败：' + (e as Error).message);
+  }
 };
 
 const goUp = () => {
@@ -1202,93 +1225,219 @@ const uploadToDir = async (item: FileItem | null) => {
   await uploadFile(tabId, item.path);
 };
 
-// 通用上传逻辑
+// ======= 上传相关 =======
+
+// 为单个文件创建传输记录（不启动上传）
+const addTransferForUpload = (tabId: string, targetDir: string, localPath: string, displayName?: string): string => {
+  const fileName = localPath.split(/[\\\/]/).pop() || "";
+  const name = displayName || fileName;
+  const remotePath = targetDir === "/" ? "/" + name : targetDir + "/" + name;
+  const transferId = transferStore.addTransfer({
+    tabId, name, path: remotePath, type: "upload", size: 0,
+  });
+  return transferId;
+};
+
+// 执行单个传输项的实际上传
+// 仅处理单个文件上传（目录已在 uploadFile/onDrop 中展开）
+const executeUploadTransfer = async (tabId: string, localPath: string, transferId: string) => {
+  const transfer = transferStore.transfers.find(t => t.id === transferId);
+  if (!transfer) return;
+  transferStore.startTransfer(transferId);
+  try {
+    const result = await window.electronAPI.uploadFile(localPath, transfer.path, tabId, transferId);
+    if (result.success) {
+      transferStore.completeTransfer(transferId);
+    } else {
+      transferStore.failTransfer(transferId, result.error || "上传失败");
+    }
+  } catch (err) {
+    transferStore.failTransfer(transferId, (err as Error).message || "上传失败");
+  }
+};
+
 const uploadFile = async (tabId: string, targetDir: string) => {
   try {
     const dialogResult = await window.electronAPI.showOpenDialog();
     if (dialogResult.canceled || !dialogResult.filePaths || dialogResult.filePaths.length === 0) return;
 
-    const localPath = dialogResult.filePaths[0];
-    const fileName = localPath.split(/[/\\]/).pop() || '';
-    const remotePath = targetDir === '/' ? '/' + fileName : targetDir + '/' + fileName;
+    // Phase 1: 批量处理所有选中项，目录展开为文件列表
+    const taskItems: { localPath: string; remotePath: string; size: number; isDirectory: boolean }[] = [];
+    for (const localPath of dialogResult.filePaths) {
+      const sizeResult = await window.electronAPI.getFileSize(localPath);
+      console.log("[uploadFile] getFileSize result for", localPath, ":", sizeResult);
+      if (!sizeResult.success) {
+        // 目录：读取文件树并展开（与拖拽逻辑一致）
+        const treeResult = await window.electronAPI.readDirectoryTree(localPath);
+        console.log("[uploadFile] readDirectoryTree result:", treeResult);
+        if (!treeResult.success || !treeResult.files || treeResult.files.length === 0) {
+          continue;
+        }
+        const folderName = localPath.split(/[\\\/]/).pop() || "";
+        const remoteBase = targetDir === "/" ? "/" + folderName : targetDir + "/" + folderName;
+        // 创建远程目录结构（先创建文件夹本身，再创建子目录）
+        await window.electronAPI.executeCommand("mkdir -p \"" + remoteBase + "\"", tabId);
+        const remoteDirs = new Set<string>();
+        for (const f of treeResult.files) {
+          const relDir = f.relativePath.split("/").slice(0, -1).join("/");
+          if (relDir) {
+            remoteDirs.add(remoteBase + "/" + relDir);
+          }
+        }
+        for (const dir of remoteDirs) {
+          await window.electronAPI.executeCommand("mkdir -p \"" + dir + "\"", tabId);
+        }
+        for (const f of treeResult.files) {
+          taskItems.push({
+            localPath: f.localPath,
+            remotePath: remoteBase + "/" + f.relativePath,
+            size: f.size,
+            isDirectory: false,
+          });
+        }
+      } else {
+        const fileName = localPath.split(/[\\\/]/).pop() || "";
+        const remotePath = targetDir === "/" ? "/" + fileName : targetDir + "/" + fileName;
+        taskItems.push({
+          localPath,
+          remotePath,
+          size: sizeResult.size,
+          isDirectory: false,
+        });
+      }
+    }
 
-    // 获取文件大小
-    const sizeResult = await window.electronAPI.getFileSize(localPath);
-    const fileSize = sizeResult.success ? sizeResult.size : 0;
-
-    // 添加到传输记录
-    const transferId = transferStore.addTransfer({
-      tabId,
-      name: fileName,
-      path: remotePath,
-      type: 'upload',
-      size: fileSize,
-    });
-    transferStore.startTransfer(transferId);
-
-    const result = await window.electronAPI.uploadFile(localPath, remotePath, tabId, transferId);
-    if (result.success) {
-      transferStore.completeTransfer(transferId);
-      ElMessage.success('文件上传成功');
+    if (taskItems.length === 0) {
       loadDirectoryContent(currentPath.value);
       refreshTree();
-    } else {
-      transferStore.failTransfer(transferId, '上传失败');
-      ElMessage.error('文件上传失败');
+      return;
     }
+
+    // Phase 1b: 批量添加所有传输记录（所有 size 已知）
+    const uploadTasks: { localPath: string; transferId: string }[] = [];
+    for (const task of taskItems) {
+      const transferId = transferStore.addTransfer({
+        tabId,
+        name: task.remotePath.slice(targetDir === "/" ? 1 : targetDir.length + 1),
+        path: task.remotePath,
+        type: "upload",
+        size: task.size,
+      });
+      uploadTasks.push({ localPath: task.localPath, transferId });
+    }
+
+    // Phase 2: 逐个上传
+    console.log("[uploadFile] About to upload", uploadTasks.length, "files");
+    for (const task of uploadTasks) {
+      await executeUploadTransfer(tabId, task.localPath, task.transferId);
+    }
+
+    loadDirectoryContent(currentPath.value);
+    refreshTree();
   } catch (error) {
-    ElMessage.error('上传失败：' + (error as Error).message);
+    ElMessage.error("上传失败：" + (error as Error).message);
   }
 };
 
-// 拖入上传
 const onDragOver = (e: DragEvent) => {
-  if (e.dataTransfer?.types.includes('Files')) {
+  if (e.dataTransfer?.types.includes("Files")) {
     isDragOver.value = true;
   }
 };
 const onDragLeave = () => {
   isDragOver.value = false;
 };
+
+interface DroppedFile { localPath: string; relativePath: string; }
+
 const onDrop = async (e: DragEvent) => {
   isDragOver.value = false;
-  const files = e.dataTransfer?.files;
-  if (!files || files.length === 0) return;
+  const items = e.dataTransfer?.items;
+  if (!items || items.length === 0) return;
   const tabId = getTabId();
   if (!tabId) {
-    ElMessage.warning('请先连接到服务器');
+    ElMessage.warning("请先连接到服务器");
     return;
   }
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    // Electron 的 File 对象有 path 属性
-    const localPath = (file as any).path;
-    if (!localPath) continue;
-    const fileName = localPath.split(/[/\\]/).pop() || file.name;
-    const targetDir = currentPath.value;
-    const remotePath = targetDir === '/' ? '/' + fileName : targetDir + '/' + fileName;
 
-    // 添加到传输记录
-    const transferId = transferStore.addTransfer({
-      tabId,
-      name: fileName,
-      path: remotePath,
-      type: 'upload',
-      size: file.size || 0,
-    });
-    transferStore.startTransfer(transferId);
-
-    try {
-      await window.electronAPI.uploadFile(localPath, remotePath, tabId);
-      transferStore.completeTransfer(transferId);
-      ElMessage.success(`${fileName} 上传成功`);
-    } catch (error) {
-      transferStore.failTransfer(transferId, `${fileName} 上传失败`);
-      ElMessage.error(`${fileName} 上传失败：${(error as Error).message}`);
+  const droppedFiles: DroppedFile[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const entry = (item as any).webkitGetAsEntry?.();
+    if (entry) {
+      await collectDroppedFiles(entry, "", droppedFiles);
+    } else {
+      const file = item.getAsFile();
+      if (file) {
+        const p = (file as any).path;
+        if (p) droppedFiles.push({ localPath: p, relativePath: file.name });
+      }
     }
   }
+  if (droppedFiles.length === 0) return;
+
+  const targetDir = currentPath.value;
+
+  // 创建远程目录（如果有文件夹结构）
+  const hasFolders = droppedFiles.some(f => f.relativePath.includes("/"));
+  if (hasFolders) {
+    const remoteDirs = new Set<string>();
+    for (const f of droppedFiles) {
+      const relDir = f.relativePath.split("/").slice(0, -1).join("/");
+      if (relDir) {
+        const remoteDir = targetDir === "/" ? "/" + relDir : targetDir + "/" + relDir;
+        remoteDirs.add(remoteDir);
+      }
+    }
+    for (const dir of remoteDirs) {
+      await window.electronAPI.executeCommand("mkdir -p \"" + dir + "\"", tabId);
+    }
+  }
+
+  // Phase 1: 批量添加所有传输记录（先获取大小，确保 overallProgress 可聚合）
+  const taskItems: { localPath: string; transferId: string }[] = [];
+  for (const f of droppedFiles) {
+    const transferId = addTransferForUpload(tabId, targetDir, f.localPath, f.relativePath);
+    const sizeResult = await window.electronAPI.getFileSize(f.localPath);
+    const t = transferStore.transfers.find(t => t.id === transferId);
+    if (t && sizeResult.success) t.size = sizeResult.size;
+    taskItems.push({ localPath: f.localPath, transferId });
+  }
+
+  // Phase 2: 逐个上传
+  for (const task of taskItems) {
+    await executeUploadTransfer(tabId, task.localPath, task.transferId);
+  }
+
   loadDirectoryContent(currentPath.value);
   refreshTree();
+};
+
+const collectDroppedFiles = (entry: any, parentRelPath: string, result: DroppedFile[]): Promise<void> => {
+  return new Promise((resolve) => {
+    const relPath = parentRelPath ? parentRelPath + '/' + entry.name : entry.name;
+    if (entry.isFile) {
+      entry.file((file: any) => {
+        const p = (file as any).path;
+        if (p) result.push({ localPath: p, relativePath: relPath });
+        resolve();
+      }, () => resolve());
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = () => {
+        reader.readEntries(async (entries: any[]) => {
+          if (entries.length === 0) { resolve(); return; }
+          for (const e of entries) {
+            await collectDroppedFiles(e, relPath, result);
+          }
+          readBatch();
+        }, () => resolve());
+      };
+      readBatch();
+    } else {
+      resolve();
+    }
+  });
 };
 
 // 新建文件夹

@@ -447,6 +447,64 @@ export class SSHClient extends EventEmitter {
         });
       }
 
+
+      /** Recursively upload a local directory to remote */
+      async uploadDirectory(
+        localDir: string,
+        remoteDir: string,
+        callbacks?: {
+          onStart?: (totalFiles: number, totalSize: number) => void;
+          onProgress?: (transferred: number, total: number, fileName: string, fileIndex: number, totalFiles: number) => void;
+        },
+        abortSignal?: { aborted: boolean }
+      ): Promise<void> {
+        // Collect all files recursively
+        const allFiles: { local: string; remote: string; size: number }[] = [];
+        const walkDir = (localPath: string, remotePath: string) => {
+          const stat = fs.statSync(localPath);
+          if (stat.isDirectory()) {
+            const entries = fs.readdirSync(localPath);
+            for (const entry of entries) {
+              walkDir(
+                localPath + require("path").sep + entry,
+                remotePath + "/" + entry
+              );
+            }
+          } else if (stat.isFile()) {
+            allFiles.push({ local: localPath, remote: remotePath, size: stat.size });
+          }
+        };
+        walkDir(localDir, remoteDir);
+
+        const totalFiles = allFiles.length;
+        const totalSize = allFiles.reduce((sum, f) => sum + f.size, 0);
+        if (callbacks?.onStart) callbacks.onStart(totalFiles, totalSize);
+
+        // Create remote directory structure
+        const remoteDirs = new Set(allFiles.map(f => {
+          const parts = f.remote.split("/");
+          parts.pop();
+          return parts.join("/");
+        }));
+        for (const dir of remoteDirs) {
+          if (dir) await this.executeCommand("mkdir -p \"" + dir + "\"");
+        }
+
+        // Upload files one by one
+        let dirTransferred = 0;
+        for (let i = 0; i < allFiles.length; i++) {
+          if (abortSignal?.aborted) throw new Error("Upload cancelled");
+          const file = allFiles[i];
+          const fileName = file.local.split(/[\/\\]/).pop() || file.local;
+          await this.uploadFile(file.local, file.remote, (transferred, total) => {
+            if (callbacks?.onProgress) {
+              callbacks.onProgress(dirTransferred + transferred, totalSize, fileName, i + 1, totalFiles);
+            }
+          });
+          dirTransferred += file.size;
+        }
+      }
+
       async downloadFile(remotePath: string, localPath: string, onProgress?: (transferred: number, total: number) => void, transferId?: string): Promise<void> {
         const sftp = await this.getTransferSFTP(); // 每次新建独立通道
         return new Promise((resolve, reject) => {

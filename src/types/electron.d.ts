@@ -22,9 +22,15 @@ declare global {
       getSession: (id: string) => Promise<SessionInfo | undefined>;
       listSessions: () => Promise<SessionInfo[]>;
       getSavedSessions: () => Promise<any[]>;
+      getSavedSessionDecrypted: (id: string) => Promise<any>;
       saveSession: (config: { name: string; remark?: string; host: string; port: number; username: string; password?: string }) => Promise<{ success: boolean }>;
       updateSavedSession: (id: string, data: { name: string; remark?: string; host: string; port: number; username: string; password?: string }) => Promise<{ success: boolean }>;
       deleteSavedSession: (id: string) => Promise<{ success: boolean }>;
+      importSSHConfig: () => Promise<any[]>;
+      getGroups: () => Promise<any[]>;
+      createGroup: (name: string) => Promise<any>;
+      updateGroup: (id: string, data: { name?: string; order?: number }) => Promise<{ success: boolean }>;
+      deleteGroup: (id: string) => Promise<{ success: boolean }>;
       closeAllSessions: () => Promise<{ success: boolean }>;
       getSystemStats: (tabId: string) => Promise<{ success: boolean; stats: ServerStats | null; error?: string }>;
       startStatsMonitor: (tabId: string) => Promise<{ started: boolean }>;
@@ -70,3 +76,4 @@ declare global {
 }
 
 export {};
+

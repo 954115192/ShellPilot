@@ -25,29 +25,10 @@ export interface FileInfo {
 }
 
 export interface ServerStats {
-  cpu: {
-    usage: number;
-    loadAverage: number[];
-    cores: number;
-  };
-  memory: {
-    total: number;
-    used: number;
-    free: number;
-    usage: number;
-  };
-  disk: Array<{
-    path: string;
-    total: number;
-    used: number;
-    free: number;
-    usage: number;
-  }>;
-  network: {
-    rxBytes: number;
-    txBytes: number;
-    interface: string;
-  };
+  cpu: { usage: number; loadAverage: number[]; cores: number; };
+  memory: { total: number; used: number; free: number; usage: number; };
+  disk: Array<{ path: string; total: number; used: number; free: number; usage: number; }>;
+  network: { rxBytes: number; txBytes: number; interface: string; };
   uptime: number;
   hostname: string;
 }
@@ -70,7 +51,7 @@ export interface ConnectionResult {
   message: string;
 }
 
-// 编辑器窗口：立即监听新文件 IPC（不等 Vue 挂载）
+// Editor window: listen for new file IPC immediately
 const _pendingEditorFiles: Array<{ path: string; tabId: string }> = [];
 let _editorFileCallback: ((data: { path: string; tabId: string }) => void) | null = null;
 ipcRenderer.on('editor:open-file', (_event, data) => {
@@ -83,13 +64,17 @@ ipcRenderer.on('editor:open-file', (_event, data) => {
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // SSH
   connectSSH: (config: SSHConfig, tabId: string) => ipcRenderer.invoke('connect-ssh', config, tabId),
   disconnectSSH: (tabId: string) => ipcRenderer.invoke('disconnect-ssh', tabId),
   executeCommand: (command: string, tabId: string) => ipcRenderer.invoke('execute-command', command, tabId),
   getWorkingDirectory: (tabId: string) => ipcRenderer.invoke('get-working-directory', tabId),
+
+  // File operations
   uploadFile: (filePath: string, remotePath: string, tabId: string, transferId?: string) => ipcRenderer.invoke('upload-file', filePath, remotePath, tabId, transferId),
   downloadFile: (remotePath: string, filePath: string, tabId: string, transferId?: string) => ipcRenderer.invoke('download-file', remotePath, filePath, tabId, transferId),
   downloadDirectory: (remotePath: string, localPath: string, tabId: string, transferId: string) => ipcRenderer.invoke('download-directory', remotePath, localPath, tabId, transferId),
+  uploadDirectory: (localDir: string, remoteDir: string, tabId: string, transferId: string) => ipcRenderer.invoke('upload-directory', localDir, remoteDir, tabId, transferId),
   createDirectory: (remotePath: string, tabId: string) => ipcRenderer.invoke('create-directory', remotePath, tabId),
   listDirectory: (path: string, tabId: string) => ipcRenderer.invoke('list-directory', path, tabId),
   readFileContent: (tabId: string, remotePath: string) => ipcRenderer.invoke('file:read-content', tabId, remotePath),
@@ -101,30 +86,49 @@ contextBridge.exposeInMainWorld('electronAPI', {
     _pendingEditorFiles.length = 0;
   },
   editorReady: () => ipcRenderer.send('editor:ready'),
+
+  // Session management
   createSession: (config: SSHConfig) => ipcRenderer.invoke('create-session', config),
   getSession: (id: string) => ipcRenderer.invoke('get-session', id),
   listSessions: () => ipcRenderer.invoke('list-sessions'),
   getSavedSessions: () => ipcRenderer.invoke('get-saved-sessions'),
+  getSavedSessionDecrypted: (id: string) => ipcRenderer.invoke('get-saved-session-decrypted', id),
   saveSession: (config: { name: string; remark?: string; host: string; port: number; username: string }) => ipcRenderer.invoke('save-session', config),
-  updateSavedSession: (id: string, data: { name: string; remark?: string; host: string; port: number; username: string }) => ipcRenderer.invoke('update-saved-session', id, data),
+  updateSavedSession: (id: string, data: { name: string; remark?: string; host: string; port: number; username: string; password?: string }) => ipcRenderer.invoke('update-saved-session', id, data),
   deleteSavedSession: (id: string) => ipcRenderer.invoke('delete-saved-session', id),
   closeAllSessions: () => ipcRenderer.invoke('close-all-sessions'),
+
+  // Group management
+  getGroups: () => ipcRenderer.invoke('get-groups'),
+  createGroup: (name: string) => ipcRenderer.invoke('create-group', name),
+  updateGroup: (id: string, data: { name?: string; order?: number }) => ipcRenderer.invoke('update-group', id, data),
+  deleteGroup: (id: string) => ipcRenderer.invoke('delete-group', id),
+
+  // SSH config import
+  importSSHConfig: () => ipcRenderer.invoke('import-ssh-config'),
+
+  // System stats
   getSystemStats: (tabId: string) => ipcRenderer.invoke('get-system-stats', tabId),
   startStatsMonitor: (tabId: string) => ipcRenderer.invoke('start-stats-monitor', tabId),
   stopStatsMonitor: () => ipcRenderer.invoke('stop-stats-monitor'),
+
+  // File dialogs
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
   openFileWithSystem: (filePath: string) => ipcRenderer.invoke('open-file-with-system', filePath),
   getFileSize: (filePath: string) => ipcRenderer.invoke('get-file-size', filePath),
+  readDirectoryTree: (dirPath: string) => ipcRenderer.invoke('read-directory-tree', dirPath),
   cancelTransfer: (tabId: string, transferId: string) => ipcRenderer.invoke('cancel-transfer', tabId, transferId),
   showSaveDialog: (options?: { defaultName?: string }) => ipcRenderer.invoke('select-save-dialog', options),
   showOpenDialog: () => ipcRenderer.invoke('select-open-dialog'),
   showDirectoryDialog: () => ipcRenderer.invoke('select-directory-dialog'),
 
+  // Shell stream
   createShellStream: (tabId: string, cols: number, rows: number) => ipcRenderer.invoke('create-shell-stream', tabId, cols, rows),
   writeToShell: (tabId: string, data: string) => ipcRenderer.invoke('write-to-shell', tabId, data),
   resizeShell: (tabId: string, cols: number, rows: number) => ipcRenderer.invoke('resize-shell', tabId, cols, rows),
   closeShellStream: (tabId: string) => ipcRenderer.invoke('close-shell-stream', tabId),
 
+  // Shell events
   onShellData: (callback: (tabId: string, data: string) => void) => {
     ipcRenderer.on('shell-data', (_event, tabId: string, data: string) => callback(tabId, data));
   },
@@ -144,7 +148,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeListener(channel, callback);
   },
 
-  // AI 相关
+  // Shortcut actions
+  onShortcutAction: (callback: (action: string) => void) => {
+    ipcRenderer.on('shortcut:action', (_event, action: string) => callback(action));
+  },
+
+  // AI
   aiConfigure: (config: { baseUrl: string; apiKey: string; model: string }) => ipcRenderer.invoke('ai:configure', config),
   aiGetConfig: () => ipcRenderer.invoke('ai:get-config'),
   aiTestConnection: (config: { baseUrl: string; apiKey: string; model: string }) => ipcRenderer.invoke('ai:test-connection', config),
@@ -157,7 +166,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ai:event', (_event, data) => callback(data));
   },
 
-  // 窗口控制
+  // Window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),
   windowClose: () => ipcRenderer.invoke('window:close'),

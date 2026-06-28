@@ -28,7 +28,7 @@ export const useTransferStore = defineStore('transfer', () => {
   const hasActiveTransfers = computed(() => activeCount.value > 0)
 
   const overallProgress = computed(() => {
-    const active = transfers.value.filter(t => t.status === 'transferring' && t.size > 0)
+    const active = transfers.value.filter(t => t.status !== 'failed' && t.size > 0)
     if (active.length === 0) return 0
     const totalSize = active.reduce((sum, t) => sum + t.size, 0)
     const totalTransferred = active.reduce((sum, t) => sum + t.transferred, 0)

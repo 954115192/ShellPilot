@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron'
 import { SessionManager } from '../session/SessionManager'
 import { Session, SessionConfig } from '../session/Session'
 import { SSHClient, SSHConfig } from '../ssh/SSHClient'
@@ -7,16 +8,38 @@ import { StatsMonitor } from '../stats/StatsMonitor'
 export class IPCRegistry {
   private sessionManager: SessionManager
   private currentSession: Session | null = null
-  private sshClients: Map<string, SSHClient> = new Map()  // 使用 Map 存储多个连接，key 为 tabId
+  private sshClients: Map<string, SSHClient> = new Map()
   private statsMonitor: StatsMonitor
-  private statsCollectors: Map<string, StatsCollector> = new Map()  // 缓存 collector，保留上次网络数据
+  private statsCollectors: Map<string, StatsCollector> = new Map()
+  private mainWindow: BrowserWindow | null = null
 
   constructor() {
     this.sessionManager = new SessionManager()
     this.statsMonitor = new StatsMonitor()
   }
 
-  // 会话管理
+  /** Set main window reference for precise event delivery */
+  setMainWindow(win: BrowserWindow) {
+    this.mainWindow = win
+  }
+
+  /** Get main window, preferring saved reference */
+  private getMainWindow(): BrowserWindow | null {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      return this.mainWindow
+    }
+    return BrowserWindow.getAllWindows()[0] || null
+  }
+
+  /** Send event to renderer via main window */
+  sendToRenderer(channel: string, ...args: any[]) {
+    const win = this.getMainWindow()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, ...args)
+    }
+  }
+
+  // Session management
   async createSession(config: SessionConfig): Promise<Session> {
     const session = await this.sessionManager.createSession(config)
     this.currentSession = session
@@ -35,11 +58,19 @@ export class IPCRegistry {
     return this.sessionManager.getSavedSessions()
   }
 
-  saveSession(config: { name: string; remark?: string; host: string; port: number; username: string; password?: string }): void {
+  getSavedSessionsDecrypted(): any[] {
+    return this.sessionManager.getSavedSessionsDecrypted()
+  }
+
+  getSavedSessionDecrypted(id: string): any {
+    return this.sessionManager.getSavedSessionDecrypted(id)
+  }
+
+  saveSession(config: { name: string; remark?: string; host: string; port: number; username: string; password?: string; authType?: string; keyId?: string; groupId?: string }): void {
     this.sessionManager.saveSessionToHistory(config)
   }
 
-  updateSavedSession(id: string, data: { name: string; remark?: string; host: string; port: number; username: string; password?: string }): void {
+  updateSavedSession(id: string, data: { name: string; remark?: string; host: string; port: number; username: string; password?: string; authType?: string; keyId?: string; groupId?: string }): void {
     this.sessionManager.updateSavedSession(id, data)
   }
 
@@ -50,22 +81,17 @@ export class IPCRegistry {
   closeAllSessions(): void {
     this.sessionManager.closeAll()
     this.currentSession = null
-    // 断开所有 SSH 连接
     this.sshClients.forEach(client => client.disconnect())
     this.sshClients.clear()
   }
 
-  // SSH 连接 - 每个标签页独立连接
+  // SSH connection - per-tab independent connection
   async connectSSH(config: SSHConfig, tabId: string): Promise<{ success: boolean; message: string }> {
     try {
       console.log('[IPCRegistry] Attempting to connect to SSH:', {
-        host: config.host,
-        port: config.port,
-        username: config.username,
-        tabId: tabId
+        host: config.host, port: config.port, username: config.username, tabId
       });
 
-      // 如果该 tabId 已有连接，先断开
       const existingClient = this.sshClients.get(tabId);
       if (existingClient) {
         console.log('[IPCRegistry] Disconnecting existing SSH client for tabId:', tabId);
@@ -77,106 +103,90 @@ export class IPCRegistry {
       await client.connect();
       this.sshClients.set(tabId, client);
 
-      // 监听 SSH 级别的错误和断开事件
-      const { BrowserWindow } = require('electron');
       client.on('error', (err: Error) => {
-        const win = BrowserWindow.getAllWindows()[0];
-        if (win) {
-          win.webContents.send('ssh-error', tabId, err.message);
-        }
+        this.sendToRenderer('ssh-error', tabId, err.message);
       });
 
       client.on('disconnected', () => {
-        const win = BrowserWindow.getAllWindows()[0];
-        if (win) {
-          win.webContents.send('ssh-disconnected', tabId);
-        }
+        this.sendToRenderer('ssh-disconnected', tabId);
       });
 
       console.log('[IPCRegistry] SSH connected successfully for tabId:', tabId);
-      return { success: true, message: 'SSH 连接成功' };
+      return { success: true, message: 'SSH connected' };
     } catch (error) {
       console.error('[IPCRegistry] SSH connection failed:', error);
-      
-      // 提供更友好的错误信息
-      let errorMessage = '连接失败';
+      let errorMessage = 'Connection failed';
       if (error instanceof Error) {
         const msg = error.message;
-        if (msg.includes('ECONNREFUSED') || msg.includes('连接被拒绝')) {
-          errorMessage = `无法连接到 ${config.host}:${config.port}\n\n可能原因：\n1. SSH 服务器未启动\n2. 主机地址或端口错误\n3. 防火墙阻止了连接`;
-        } else if (msg.includes('ETIMEDOUT') || msg.includes('连接超时')) {
-          errorMessage = `连接超时\n\n请检查：\n1. 网络连接是否正常\n2. 主机地址是否正确\n3. 服务器是否在线`;
-        } else if (msg.includes('ENOTFOUND') || msg.includes('无法找到主机')) {
-          errorMessage = `无法找到主机: ${config.host}\n\n请检查主机地址是否正确`;
-        } else if (msg.includes('ECONNRESET') || msg.includes('连接被重置')) {
-          errorMessage = `连接被重置\n\n可能原因：\n1. 服务器主动断开连接\n2. 网络不稳定`;
+        if (msg.includes('ECONNREFUSED') || msg.includes('Connection refused')) {
+          errorMessage = `Cannot connect to ${config.host}:${config.port}\n\nPossible causes:\n1. SSH server not running\n2. Wrong host/port\n3. Firewall blocking`;
+        } else if (msg.includes('ETIMEDOUT') || msg.includes('timed out')) {
+          errorMessage = `Connection timed out\n\nPlease check:\n1. Network connectivity\n2. Host address\n3. Server status`;
+        } else if (msg.includes('ENOTFOUND')) {
+          errorMessage = `Host not found: ${config.host}`;
+        } else if (msg.includes('ECONNRESET')) {
+          errorMessage = `Connection reset\n\nPossible causes:\n1. Server dropped connection\n2. Unstable network`;
         } else {
           errorMessage = msg;
         }
       }
-      
       return { success: false, message: errorMessage };
-    }
-  }
-
-  async executeCommand(command: string, tabId: string): Promise<{ success: boolean; output: string; error?: string }> {
-    const client = this.sshClients.get(tabId);
-    if (!client) {
-      return { success: false, output: '', error: '未连接 SSH' }
-    }
-
-    try {
-      const output = await client.executeCommand(command)
-      return { success: true, output }
-    } catch (error) {
-      return { success: false, output: '', error: (error as Error).message }
     }
   }
 
   async disconnectSSH(tabId: string): Promise<void> {
     const client = this.sshClients.get(tabId);
     if (client) {
-      await client.disconnect()
-      this.sshClients.delete(tabId)
-      this.statsCollectors.delete(tabId)
-      console.log('[IPCRegistry] Disconnected SSH for tabId:', tabId);
+      await client.disconnect();
+      this.sshClients.delete(tabId);
+    }
+    this.statsCollectors.delete(tabId);
+  }
+
+  async executeCommand(command: string, tabId: string): Promise<{ success: boolean; output: string; error?: string }> {
+    const client = this.sshClients.get(tabId);
+    if (!client) return { success: false, output: '', error: 'SSH not connected' }
+    try {
+      const output = await client.executeCommand(command);
+      return { success: true, output: output || '' };
+    } catch (error) {
+      return { success: false, output: '', error: (error as Error).message };
     }
   }
 
-  // 文件操作
-  async uploadFile(filePath: string, remotePath: string, tabId: string, onProgress?: (transferred: number, total: number) => void, transferId?: string): Promise<void> {
+  async listDirectory(path: string, tabId: string): Promise<any[]> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
+    return client.listDirectory(path);
+  }
+
+  async uploadFile(filePath: string, remotePath: string, tabId: string, onProgress: (transferred: number, total: number) => void, transferId?: string): Promise<void> {
+    const client = this.sshClients.get(tabId);
+    if (!client) throw new Error('SSH not connected')
     await client.uploadFile(filePath, remotePath, onProgress, transferId)
   }
 
-  async downloadFile(remotePath: string, filePath: string, tabId: string, onProgress?: (transferred: number, total: number) => void, transferId?: string): Promise<void> {
+  async uploadDirectory(localDir: string, remoteDir: string, tabId: string, callbacks?: { onStart?: (totalFiles: number, totalSize: number) => void; onProgress?: (transferred: number, total: number, fileName: string, fileIndex: number, totalFiles: number) => void }, abortSignal?: AbortSignal): Promise<void> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
+    await client.uploadDirectory(localDir, remoteDir, callbacks, abortSignal)
+  }
+
+  async downloadFile(remotePath: string, filePath: string, tabId: string, onProgress: (transferred: number, total: number) => void, transferId?: string): Promise<void> {
+    const client = this.sshClients.get(tabId);
+    if (!client) throw new Error('SSH not connected')
     await client.downloadFile(remotePath, filePath, onProgress, transferId)
   }
 
-  async downloadDirectory(remotePath: string, localPath: string, tabId: string, callbacks?: {
-    onStart?: (totalFiles: number, totalSize: number) => void
-    onProgress?: (transferred: number, total: number, fileName: string, fileIndex: number, totalFiles: number) => void
-  }, abortSignal?: { aborted: boolean }): Promise<void> {
+  async downloadDirectory(remotePath: string, localPath: string, tabId: string, callbacks?: any, abortSignal?: AbortSignal): Promise<void> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
     await client.downloadDirectory(remotePath, localPath, callbacks, abortSignal)
   }
 
-  // 取消传输
   cancelTransfer(tabId: string, transferId: string): void {
     const client = this.sshClients.get(tabId);
-    if (client) {
-      client.cancelTransfer(transferId)
-    }
+    if (client) client.cancelTransfer(transferId)
   }
 
   registerAbortSignal(tabId: string, transferId: string): { aborted: boolean } | null {
@@ -187,45 +197,19 @@ export class IPCRegistry {
 
   async createDirectory(remotePath: string, tabId: string): Promise<void> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
     await client.executeCommand(`mkdir -p "${remotePath}"`)
   }
 
-  // 获取当前工作目录
   getWorkingDirectory(tabId: string): string {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      return '/';
-    }
+    if (!client) return '/';
     return client.getWorkingDirectory();
   }
 
-  async listDirectory(path: string, tabId: string): Promise<any[]> {
-    console.log('[IPCRegistry] listDirectory called with path:', path, 'tabId:', tabId);
-    
-    const client = this.sshClients.get(tabId);
-    if (!client) {
-      console.error('[IPCRegistry] No SSH client connected for tabId:', tabId);
-      throw new Error('未连接 SSH')
-    }
-    
-    try {
-      console.log('[IPCRegistry] Calling sshClient.listDirectory...');
-      const result = await client.listDirectory(path);
-      console.log('[IPCRegistry] listDirectory success, files:', result.length);
-      return result;
-    } catch (error) {
-      console.error('[IPCRegistry] listDirectory failed:', error);
-      throw error;
-    }
-  }
-
-  // 文件内容读写（编辑器用）
   async readFileContent(tabId: string, remotePath: string): Promise<{ success: boolean; content?: string; error?: string }> {
     const client = this.sshClients.get(tabId);
-    if (!client) return { success: false, error: '未连接 SSH' }
+    if (!client) return { success: false, error: 'SSH not connected' }
     try {
       const content = await client.readFile(remotePath)
       return { success: true, content }
@@ -236,7 +220,7 @@ export class IPCRegistry {
 
   async writeFileContent(tabId: string, remotePath: string, content: string): Promise<{ success: boolean; error?: string }> {
     const client = this.sshClients.get(tabId);
-    if (!client) return { success: false, error: '未连接 SSH' }
+    if (!client) return { success: false, error: 'SSH not connected' }
     try {
       await client.writeFile(remotePath, content)
       return { success: true }
@@ -245,13 +229,9 @@ export class IPCRegistry {
     }
   }
 
-  // 性能监控 - 使用远程服务器统计
   async getSystemStats(tabId: string): Promise<any> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
-    // 复用同一个 collector，保留 lastNetworkStats 以计算速度
+    if (!client) throw new Error('SSH not connected')
     let collector = this.statsCollectors.get(tabId)
     if (!collector) {
       collector = new StatsCollector(client)
@@ -262,9 +242,7 @@ export class IPCRegistry {
 
   async startStatsMonitor(callback: (stats: any) => void, tabId: string): Promise<void> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
     await this.statsMonitor.start(callback, client)
   }
 
@@ -272,22 +250,14 @@ export class IPCRegistry {
     await this.statsMonitor.stop()
   }
 
-  // Shell stream 支持
   async createShellStream(tabId: string, cols: number, rows: number): Promise<void> {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
     return new Promise((resolve, reject) => {
       client.createShellStream(
         tabId,
         (data: string) => {
-          // 通过 Electron main 进程发送数据到渲染进程
-          const { BrowserWindow } = require('electron');
-          const win = BrowserWindow.getAllWindows()[0];
-          if (win) {
-            win.webContents.send('shell-data', tabId, data);
-          }
+          this.sendToRenderer('shell-data', tabId, data);
         },
         cols,
         rows
@@ -297,9 +267,7 @@ export class IPCRegistry {
 
   writeToShell(tabId: string, data: string): void {
     const client = this.sshClients.get(tabId);
-    if (!client) {
-      throw new Error('未连接 SSH')
-    }
+    if (!client) throw new Error('SSH not connected')
     client.writeToShell(tabId, data);
   }
 
@@ -315,8 +283,12 @@ export class IPCRegistry {
     client.closeShellStream(tabId);
   }
 
-  // 获取 SSH Client（供 AI 模块使用）
   getSSHClient(tabId: string): SSHClient | undefined {
     return this.sshClients.get(tabId)
   }
+  // --- Group management ---
+  getGroups() { return this.sessionManager.getGroups() }
+  createGroup(name: string) { return this.sessionManager.createGroup(name) }
+  updateGroup(id: string, data: { name?: string; order?: number }) { this.sessionManager.updateGroup(id, data) }
+  deleteGroup(id: string) { this.sessionManager.deleteGroup(id) }
 }

@@ -231,6 +231,23 @@ onMounted(() => {
   setActiveTabId('1')
   addStoreTab({ id: '1', name: '新标签', session: null })
 
+
+// Listen for global shortcut actions from main process
+window.electronAPI.onShortcutAction((action: string) => {
+  switch (action) {
+    case 'new-tab': addTab(); break;
+    case 'close-tab': if (activeTabId.value) removeTab(activeTabId.value); break;
+    case 'new-connection': activeMenu.value = 'terminal'; break;
+    case 'open-settings': activeMenu.value = 'settings'; break;
+    case 'toggle-files':
+    case 'toggle-ai':
+    case 'toggle-stats':
+    case 'clear-terminal':
+      // These are handled by the Terminal component directly
+      window.dispatchEvent(new CustomEvent('shortcut:action', { detail: action }))
+      break
+  }
+})
   window.addEventListener('switch-menu', handleSwitchMenu)
 })
 

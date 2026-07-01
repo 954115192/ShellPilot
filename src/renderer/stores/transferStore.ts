@@ -14,6 +14,7 @@ export interface TransferItem {
   startTime: number
   endTime?: number
   error?: string
+  batchId?: string
   _lastTransferred?: number
   _lastSpeedTime?: number
 }
@@ -28,7 +29,14 @@ export const useTransferStore = defineStore('transfer', () => {
   const hasActiveTransfers = computed(() => activeCount.value > 0)
 
   const overallProgress = computed(() => {
-    const active = transfers.value.filter(t => t.status !== 'failed' && t.size > 0)
+    const activeBatchId = transfers.value.find(t =>
+      (t.status === 'transferring' || t.status === 'pending' || t.status === 'waiting') && t.batchId
+    )?.batchId
+    const active = transfers.value.filter(t =>
+      t.status !== 'failed' &&
+      t.size > 0 &&
+      (!activeBatchId || t.batchId === activeBatchId)
+    )
     if (active.length === 0) return 0
     const totalSize = active.reduce((sum, t) => sum + t.size, 0)
     const totalTransferred = active.reduce((sum, t) => sum + t.transferred, 0)

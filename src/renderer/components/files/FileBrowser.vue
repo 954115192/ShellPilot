@@ -116,6 +116,7 @@
 
         <div
             class="list-panel"
+            @dragenter.prevent="onDragEnter"
             @dragover.prevent="onDragOver"
             @dragleave.prevent="onDragLeave"
             @drop.prevent="onDrop"
@@ -195,6 +196,9 @@
         :virtual-ref="triggerRef"
         trigger="click"
         virtual-triggering
+        placement="bottom-start"
+        popper-class="file-context-menu-popper"
+        :popper-options="contextMenuPopperOptions"
         :show-arrow="false"
         @command="handleContextMenuCommand"
         @visible-change="onMenuVisibleChange"
@@ -416,16 +420,42 @@ const treeProps = {
 const contextMenuItem = ref<FileItem | null>(null);
 const contextMenuDropdownRef = ref();
 const contextMenuVisible = ref(false);
+let restoreBodyOverflow = ''
 const clipboard = ref<{ item: FileItem; action: 'copy' } | null>(null);
 const position = ref({
   top: 0,
   left: 0,
   bottom: 0,
   right: 0,
+  width: 0,
+  height: 0,
 })
 const triggerRef = ref({
   getBoundingClientRect: () => position.value,
 })
+const contextMenuPopperOptions = {
+  modifiers: [
+    {
+      name: 'flip',
+      options: {
+        boundary: 'viewport',
+        rootBoundary: 'viewport',
+        padding: 8,
+        fallbackPlacements: ['top-start', 'bottom-end', 'top-end'],
+      },
+    },
+    {
+      name: 'preventOverflow',
+      options: {
+        boundary: 'viewport',
+        rootBoundary: 'viewport',
+        padding: 8,
+        altAxis: true,
+        tether: false,
+      },
+    },
+  ],
+}
 // 拖入上传
 const isDragOver = ref(false);
 
@@ -919,11 +949,9 @@ const handleSortChange = ({prop, order}: { prop: string; order: string | null })
 
 // 通用：打开右键菜单（先关闭已有菜单，重新定位再打开）
 const openContextMenu = (event: MouseEvent) => {
-  const { clientX, clientY } = event
-  position.value = DOMRect.fromRect({
-    x: clientX,
-    y: clientY,
-  })
+  const x = Math.min(Math.max(event.clientX, 8), Math.max(8, window.innerWidth - 8))
+  const y = Math.min(Math.max(event.clientY, 8), Math.max(8, window.innerHeight - 8))
+  position.value = new DOMRect(x, y, 0, 0)
   contextMenuDropdownRef.value.handleOpen();
 };
 
@@ -956,6 +984,12 @@ const handleListPanelContextMenu = (event: MouseEvent) => {
 // 监听下拉菜单显示状态
 const onMenuVisibleChange = (visible: boolean) => {
   contextMenuVisible.value = visible;
+  if (visible) {
+    restoreBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.body.style.overflow = restoreBodyOverflow
+  }
 };
 
 // el-dropdown 命令处理
@@ -1227,16 +1261,47 @@ const uploadToDir = async (item: FileItem | null) => {
 
 // ======= 上传相关 =======
 
-// 为单个文件创建传输记录（不启动上传）
-const addTransferForUpload = (tabId: string, targetDir: string, localPath: string, displayName?: string): string => {
-  const fileName = localPath.split(/[\\\/]/).pop() || "";
-  const name = displayName || fileName;
-  const remotePath = targetDir === "/" ? "/" + name : targetDir + "/" + name;
-  const transferId = transferStore.addTransfer({
-    tabId, name, path: remotePath, type: "upload", size: 0,
-  });
-  return transferId;
-};
+interface UploadTask {
+  localPath: string;
+  remotePath: string;
+  name: string;
+  size: number;
+}
+
+const normalizeRemotePath = (...parts: string[]) => {
+  const joined = parts
+    .filter(Boolean)
+    .join('/')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+  return joined.startsWith('/') ? joined : '/' + joined
+}
+
+const quoteRemotePath = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`
+
+const formatUploadError = (error: unknown, remotePath?: string) => {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (/No such file/i.test(message)) {
+    return remotePath ? `远程目录不存在或路径不可写：${remotePath}` : '远程目录不存在或路径不可写'
+  }
+  if (/Permission denied/i.test(message)) return '没有权限写入目标目录'
+  if (/failure/i.test(message)) return 'SFTP 写入失败，请检查远程路径和权限'
+  return message || '上传失败'
+}
+
+const createRemoteDirectories = async (tabId: string, remotePaths: string[]) => {
+  const dirs = new Set<string>()
+  for (const remotePath of remotePaths) {
+    const dir = remotePath.split('/').slice(0, -1).join('/') || '/'
+    if (dir && dir !== '/') dirs.add(dir)
+  }
+  for (const dir of Array.from(dirs).sort((a, b) => a.length - b.length)) {
+    const result = await window.electronAPI.executeCommand(`mkdir -p ${quoteRemotePath(dir)}`, tabId)
+    if (result && result.success === false) {
+      throw new Error(result.error || result.output || `创建远程目录失败：${dir}`)
+    }
+  }
+}
 
 // 执行单个传输项的实际上传
 // 仅处理单个文件上传（目录已在 uploadFile/onDrop 中展开）
@@ -1249,60 +1314,67 @@ const executeUploadTransfer = async (tabId: string, localPath: string, transferI
     if (result.success) {
       transferStore.completeTransfer(transferId);
     } else {
-      transferStore.failTransfer(transferId, result.error || "上传失败");
+      transferStore.failTransfer(transferId, formatUploadError(result.error, transfer.path));
     }
   } catch (err) {
-    transferStore.failTransfer(transferId, (err as Error).message || "上传失败");
+    transferStore.failTransfer(transferId, formatUploadError(err, transfer.path));
   }
 };
+
+const executeUploadBatch = async (tabId: string, tasks: UploadTask[]) => {
+  if (tasks.length === 0) return
+
+  await createRemoteDirectories(tabId, tasks.map(task => task.remotePath))
+
+  const batchId = 'upload-batch-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+  const uploadTasks: { localPath: string; transferId: string }[] = []
+  for (const task of tasks) {
+    const transferId = transferStore.addTransfer({
+      tabId,
+      name: task.name,
+      path: task.remotePath,
+      type: 'upload',
+      size: task.size,
+      batchId,
+    })
+    uploadTasks.push({ localPath: task.localPath, transferId })
+  }
+
+  for (const task of uploadTasks) {
+    await executeUploadTransfer(tabId, task.localPath, task.transferId)
+  }
+}
 
 const uploadFile = async (tabId: string, targetDir: string) => {
   try {
     const dialogResult = await window.electronAPI.showOpenDialog();
     if (dialogResult.canceled || !dialogResult.filePaths || dialogResult.filePaths.length === 0) return;
 
-    // Phase 1: 批量处理所有选中项，目录展开为文件列表
-    const taskItems: { localPath: string; remotePath: string; size: number; isDirectory: boolean }[] = [];
+    const taskItems: UploadTask[] = [];
     for (const localPath of dialogResult.filePaths) {
       const sizeResult = await window.electronAPI.getFileSize(localPath);
-      console.log("[uploadFile] getFileSize result for", localPath, ":", sizeResult);
       if (!sizeResult.success) {
-        // 目录：读取文件树并展开（与拖拽逻辑一致）
         const treeResult = await window.electronAPI.readDirectoryTree(localPath);
-        console.log("[uploadFile] readDirectoryTree result:", treeResult);
         if (!treeResult.success || !treeResult.files || treeResult.files.length === 0) {
           continue;
         }
         const folderName = localPath.split(/[\\\/]/).pop() || "";
-        const remoteBase = targetDir === "/" ? "/" + folderName : targetDir + "/" + folderName;
-        // 创建远程目录结构（先创建文件夹本身，再创建子目录）
-        await window.electronAPI.executeCommand("mkdir -p \"" + remoteBase + "\"", tabId);
-        const remoteDirs = new Set<string>();
         for (const f of treeResult.files) {
-          const relDir = f.relativePath.split("/").slice(0, -1).join("/");
-          if (relDir) {
-            remoteDirs.add(remoteBase + "/" + relDir);
-          }
-        }
-        for (const dir of remoteDirs) {
-          await window.electronAPI.executeCommand("mkdir -p \"" + dir + "\"", tabId);
-        }
-        for (const f of treeResult.files) {
+          const relativePath = normalizeRemotePath(folderName, f.relativePath).slice(1)
           taskItems.push({
             localPath: f.localPath,
-            remotePath: remoteBase + "/" + f.relativePath,
+            remotePath: normalizeRemotePath(targetDir, folderName, f.relativePath),
+            name: relativePath,
             size: f.size,
-            isDirectory: false,
           });
         }
       } else {
         const fileName = localPath.split(/[\\\/]/).pop() || "";
-        const remotePath = targetDir === "/" ? "/" + fileName : targetDir + "/" + fileName;
         taskItems.push({
           localPath,
-          remotePath,
+          remotePath: normalizeRemotePath(targetDir, fileName),
+          name: fileName,
           size: sizeResult.size,
-          isDirectory: false,
         });
       }
     }
@@ -1313,44 +1385,36 @@ const uploadFile = async (tabId: string, targetDir: string) => {
       return;
     }
 
-    // Phase 1b: 批量添加所有传输记录（所有 size 已知）
-    const uploadTasks: { localPath: string; transferId: string }[] = [];
-    for (const task of taskItems) {
-      const transferId = transferStore.addTransfer({
-        tabId,
-        name: task.remotePath.slice(targetDir === "/" ? 1 : targetDir.length + 1),
-        path: task.remotePath,
-        type: "upload",
-        size: task.size,
-      });
-      uploadTasks.push({ localPath: task.localPath, transferId });
-    }
-
-    // Phase 2: 逐个上传
-    console.log("[uploadFile] About to upload", uploadTasks.length, "files");
-    for (const task of uploadTasks) {
-      await executeUploadTransfer(tabId, task.localPath, task.transferId);
-    }
+    await executeUploadBatch(tabId, taskItems)
 
     loadDirectoryContent(currentPath.value);
     refreshTree();
   } catch (error) {
-    ElMessage.error("上传失败：" + (error as Error).message);
+    ElMessage.error("上传失败：" + formatUploadError(error));
   }
 };
 
+let dragDepth = 0
+const onDragEnter = (e: DragEvent) => {
+  if (e.dataTransfer?.types.includes("Files")) {
+    dragDepth += 1
+    isDragOver.value = true
+  }
+}
 const onDragOver = (e: DragEvent) => {
   if (e.dataTransfer?.types.includes("Files")) {
     isDragOver.value = true;
   }
 };
 const onDragLeave = () => {
-  isDragOver.value = false;
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) isDragOver.value = false;
 };
 
 interface DroppedFile { localPath: string; relativePath: string; }
 
 const onDrop = async (e: DragEvent) => {
+  dragDepth = 0
   isDragOver.value = false;
   const items = e.dataTransfer?.items;
   if (!items || items.length === 0) return;
@@ -1378,39 +1442,24 @@ const onDrop = async (e: DragEvent) => {
 
   const targetDir = currentPath.value;
 
-  // 创建远程目录（如果有文件夹结构）
-  const hasFolders = droppedFiles.some(f => f.relativePath.includes("/"));
-  if (hasFolders) {
-    const remoteDirs = new Set<string>();
-    for (const f of droppedFiles) {
-      const relDir = f.relativePath.split("/").slice(0, -1).join("/");
-      if (relDir) {
-        const remoteDir = targetDir === "/" ? "/" + relDir : targetDir + "/" + relDir;
-        remoteDirs.add(remoteDir);
-      }
-    }
-    for (const dir of remoteDirs) {
-      await window.electronAPI.executeCommand("mkdir -p \"" + dir + "\"", tabId);
-    }
-  }
-
-  // Phase 1: 批量添加所有传输记录（先获取大小，确保 overallProgress 可聚合）
-  const taskItems: { localPath: string; transferId: string }[] = [];
+  const taskItems: UploadTask[] = [];
   for (const f of droppedFiles) {
-    const transferId = addTransferForUpload(tabId, targetDir, f.localPath, f.relativePath);
     const sizeResult = await window.electronAPI.getFileSize(f.localPath);
-    const t = transferStore.transfers.find(t => t.id === transferId);
-    if (t && sizeResult.success) t.size = sizeResult.size;
-    taskItems.push({ localPath: f.localPath, transferId });
+    taskItems.push({
+      localPath: f.localPath,
+      remotePath: normalizeRemotePath(targetDir, f.relativePath),
+      name: f.relativePath,
+      size: sizeResult.success ? sizeResult.size : 0,
+    });
   }
 
-  // Phase 2: 逐个上传
-  for (const task of taskItems) {
-    await executeUploadTransfer(tabId, task.localPath, task.transferId);
+  try {
+    await executeUploadBatch(tabId, taskItems)
+    loadDirectoryContent(currentPath.value);
+    refreshTree();
+  } catch (error) {
+    ElMessage.error("上传失败：" + formatUploadError(error));
   }
-
-  loadDirectoryContent(currentPath.value);
-  refreshTree();
 };
 
 const collectDroppedFiles = (entry: any, parentRelPath: string, result: DroppedFile[]): Promise<void> => {
@@ -1731,6 +1780,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousedown', handleMouseSideButtons);
   window.removeEventListener('mouseup', handleMouseSideButtons);
   window.electronAPI.removeListener('transfer-progress', handleTransferProgress);
+  if (contextMenuVisible.value) {
+    document.body.style.overflow = restoreBodyOverflow
+  }
 });
 
 const handleMouseSideButtons = (event: MouseEvent) => {

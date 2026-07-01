@@ -320,6 +320,7 @@ const suggestionsVisible = ref(false)
 const suggestionPos = ref({ x: 0, y: 0 })
 const suggestionFlip = ref(false)
 const currentInput = ref('')
+const commandDecorationDisposables: { dispose: () => void }[] = []
 
 // 常用命令相关
 const connKey = computed(() => {
@@ -773,6 +774,28 @@ const handleSuggestionSelect = (command: string) => {
   hideSuggestions()
 }
 
+const markSubmittedCommandLine = () => {
+  const term = terminal.value as any
+  if (!term || !currentInput.value.trim() || typeof term.registerMarker !== 'function') return
+  const marker = term.registerMarker(0)
+  if (!marker || typeof term.registerDecoration !== 'function') return
+
+  setTimeout(() => {
+    if (marker.isDisposed) return
+    const decoration = term.registerDecoration({
+      marker,
+      foregroundColor: '#67e8f9',
+      width: term.cols || 80,
+    })
+    if (decoration) {
+      commandDecorationDisposables.push(decoration)
+      if (commandDecorationDisposables.length > 200) {
+        commandDecorationDisposables.shift()?.dispose()
+      }
+    }
+  }, 50)
+}
+
 const handleShellInput = (data: string) => {
   const tabId = props.session?.tabId
   if (!tabId) return
@@ -818,6 +841,7 @@ const handleShellInput = (data: string) => {
         // 第一个是用户自己的输入 → 直接执行
         if (currentInput.value.trim()) {
           commandStore.recordCommand(connKey.value, currentInput.value)
+          markSubmittedCommandLine()
         }
         currentInput.value = ''
         hideSuggestions()
@@ -839,6 +863,7 @@ const handleShellInput = (data: string) => {
     // 无建议时正常执行
     if (currentInput.value.trim()) {
       commandStore.recordCommand(connKey.value, currentInput.value)
+      markSubmittedCommandLine()
     }
     currentInput.value = ''
     hideSuggestions()
@@ -1151,6 +1176,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopFollowingCursor()
+  commandDecorationDisposables.splice(0).forEach(d => d.dispose())
   if (speedTimer) { clearInterval(speedTimer); speedTimer = null }
 
   if (pasteHandler && terminalRef.value) {
@@ -1561,6 +1587,7 @@ defineExpose({ focus });
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding-left: 10px;
 }
 
 .terminal-area .terminal {

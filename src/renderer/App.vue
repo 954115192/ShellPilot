@@ -31,19 +31,19 @@
           <template #title>设置</template>
         </el-menu-item>
       </el-menu>
-      
+
       <div class="sidebar-footer">
-        <el-button 
-          link 
-          class="collapse-btn" 
+        <el-button
+          link
+          class="collapse-btn"
           @click="toggleCollapse"
           :title="isCollapsed ? '展开' : '折叠'"
         >
           <el-icon><Fold v-if="!isCollapsed" /><Expand v-else /></el-icon>
         </el-button>
-        <el-button 
-          link 
-          class="theme-toggle" 
+        <el-button
+          link
+          class="theme-toggle"
           @click="toggleTheme"
           :title="isDark ? '切换到亮色主题' : '切换到暗色主题'"
         >
@@ -372,7 +372,7 @@ body {
 }
 
 .sidebar-footer {
-  padding: 8px;
+  padding: 2px 16px;
   border-top: 1px solid var(--el-border-color);
   display: flex;
   justify-content: space-between;
@@ -424,7 +424,7 @@ body {
   flex: 1;
   min-height: 0;
   background-color: var(--el-bg-color);
-  padding: 16px;
+  padding: 0;
   overflow: hidden;
 }
 </style>

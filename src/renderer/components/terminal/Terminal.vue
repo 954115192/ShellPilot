@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="terminal-wrapper" @contextmenu.prevent="handleContextMenu" @mousedown="handleContainerClick">
     <div class="terminal-area">
       <div ref="terminalRef" class="terminal"></div>
@@ -392,9 +392,35 @@ const cancelTransfer = async (item: any) => {
   }
 }
 
-// 终端主题（从 settingsStore 获取用户配置的预设主题）
+// 终端主题（从 settingsStore 获取用户配置的预设主题，亮色模式下使用浅色背景）
 const getTerminalTheme = () => {
   const t = settingsStore.getTerminalTheme()
+  if (!props.isDark) {
+    return {
+      background: '#ffffff',
+      foreground: '#1e1e1e',
+      cursor: t.cursor === '#ffffff' ? '#1e1e1e' : t.cursor,
+      cursorAccent: '#ffffff',
+      selectionBackground: 'rgba(0, 0, 0, 0.15)',
+      selectionForeground: t.selectionForeground,
+      black: t.white,
+      red: t.red,
+      green: t.green,
+      yellow: t.yellow,
+      blue: t.blue,
+      magenta: t.magenta,
+      cyan: t.cyan,
+      white: t.black,
+      brightBlack: t.brightWhite,
+      brightRed: t.brightRed,
+      brightGreen: t.brightGreen,
+      brightYellow: t.brightYellow,
+      brightBlue: t.brightBlue,
+      brightMagenta: t.brightMagenta,
+      brightCyan: t.brightCyan,
+      brightWhite: t.brightBlack,
+    }
+  }
   return {
     background: t.background,
     foreground: t.foreground,
@@ -1601,3 +1627,4 @@ defineExpose({ focus });
   overflow: hidden;
 }
 </style>
+

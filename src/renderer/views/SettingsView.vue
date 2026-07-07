@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="settings-view">
     <el-card>
       <template #header>
@@ -197,11 +197,10 @@
                   测试连接
                 </el-button>
               </el-form-item>
-              <el-form-item v-if="aiTestResult">
-                <el-tag :type="aiTestResult.success ? 'success' : 'danger'" size="small">
-                  {{ aiTestResult.message }}
-                </el-tag>
-              </el-form-item>
+              <div v-if="aiTestResult" class="ai-test-result" :class="aiTestResult.success ? 'test-success' : 'test-fail'">
+                <el-icon :size="14"><CircleCheckFilled v-if="aiTestResult.success" /><CircleCloseFilled v-else /></el-icon>
+                <span>{{ aiTestResult.message }}</span>
+              </div>
             </el-form>
           </div>
         </el-collapse-item>
@@ -331,7 +330,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSettingsStore, TERMINAL_PRESETS } from '../stores/settingsStore'
 import { useCommandStore } from '../stores/commandStore'
@@ -426,7 +425,8 @@ async function testAIConnection() {
   aiTestResult.value = null
   try {
     const { baseUrl, apiKey, model } = aiConfig.value
-    aiTestResult.value = await window.electronAPI.aiTestConnection({ baseUrl, apiKey, model })
+        const res = await window.electronAPI.aiTestConnection({ baseUrl, apiKey, model })
+    aiTestResult.value = { success: !!res.success, message: res.message || (res.success ? '连接成功' : '连接失败') }
   } catch (err) {
     aiTestResult.value = { success: false, message: (err as Error).message }
   } finally {
@@ -804,4 +804,25 @@ const deleteKey = async (id: string) => {
   font-size: 11px;
   color: var(--el-text-color-secondary);
 }
+.ai-test-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.ai-test-result.test-success {
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  border: 1px solid var(--el-color-success-light-5);
+}
+.ai-test-result.test-fail {
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
+  border: 1px solid var(--el-color-danger-light-5);
+}
 </style>
+
+

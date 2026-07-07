@@ -11,7 +11,7 @@
     "build": "vite build && tsc --project tsconfig.main.json && tsc src/preload/index.ts --outDir dist/preload --module commonjs --target ES2020 --esModuleInterop --skipLibCheck --declaration false",
     "electron": "electron .",
     "start": "npm run build && electron .",
-    "package": "electron-builder",
+    "package": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -1,4 +1,4 @@
-import { net } from 'electron'
+﻿import { net } from 'electron'
 
 export interface LLMConfig {
   baseUrl: string    // API 地址
@@ -92,7 +92,7 @@ export class LLMProvider {
       const url = `${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`
       const response = await this.httpRequest(url, body)
 
-      if (!response.ok) {
+      if (response.statusCode < 200 || response.statusCode >= 300) {
         const errorText = await this.readStream(response)
         return { success: false, message: `HTTP ${response.statusCode}: ${errorText}` }
       }
@@ -214,3 +214,4 @@ export class LLMProvider {
     }
   }
 }
+
